@@ -1,0 +1,192 @@
+# CV 自动化训练中台
+
+面向「一人公司」的零代码 CV 模型训练平台。用户上传手动画框的样板图 + 口语描述，系统自动完成从意图理解 → 海量打标 → 数据增强 → 模型训练 → 交付的全流程。
+
+## 核心流程
+
+```
+用户上传样板图 + 文字描述
+    ↓
+[阶段一] VLM 解析意图 → 结构化检测任务书（OpenAI / Kimi / Gemini）
+    ↓
+[阶段二] 本地 GPU 两段式打标
+    ├── 第一段：YOLO-World 画框（FP16，4GB 显存即可）
+    └── 第二段：Moondream2 VQA 质检（清晰度/完整性/一致性）
+    ↓
+[阶段二点五] Albumentations 数据增强（零 API 成本）
+    ↓
+[阶段三] 数据集分层分割（8:1:1 训练/验证/测试）
+    ↓
+[阶段四] 本地或云端训练（本地 subprocess / 通用 SSH / AutoDL）
+    ↓
+交付 best.pt + ONNX + 训练报告
+```
+
+## 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| 前端 | React + TypeScript + Vite + Zustand |
+| 实时通信 | WebSocket（前端 ↔ 本地 Worker） |
+| 后端 API | FastAPI + SQLAlchemy |
+| 本地 Worker | Python 独立进程 |
+| 目标检测（打标） | Ultralytics YOLO-World（FP16） |
+| VQA 质检 | Moondream2 |
+| 数据增强 | Albumentations >= 1.4.0 |
+| 云端训练 | Ultralytics YOLO CLI |
+| 云端调度 | 通用 SSH（任意 GPU 服务器）/ AutoDL API |
+| 数据库 | SQLite（开发）/ PostgreSQL（生产） |
+
+## 目录结构
+
+```
+CV_Auto_Trainer/
+├── frontend/                 # React 前端（Vite + TypeScript + Zustand）
+│   ├── src/
+│   │   ├── pages/            # Upload / IntentConfirm / LabelingProgress /
+│   │   │                    #   AugmentConfig / ReviewSamples / TrainConfig /
+│   │   │                    #   TrainingMonitor / Delivery
+│   │   ├── components/       # AnnotationCanvas / AugPreview / MetricsChart / GpuMonitor
+│   │   ├── store/            # taskStore.ts / settingsStore.ts（Zustand）
+│   │   └── api/              # backend.ts / worker.ts
+│   └── package.json
+│
+├── backend/                  # FastAPI 后端
+│   ├── routers/              # tasks / vlm / files / settings / training
+│   ├── services/             # vlm_adapter / train_dispatcher / cloud_trainer /
+│   │                        #   generic_ssh_trainer / autodl_trainer / alert_manager
+│   └── models/               # db.py（SQLAlchemy 模型）
+│
+├── worker/                   # 本地 Worker（独立进程，port 7860）
+│   ├── pipeline/             # stage2_labeler / stage25_augmentor / gpu_manager
+│   └── utils/                # yolo_io / dataset_splitter
+│
+├── cloud_scripts/            # 上传至云端实例的训练脚本
+│   ├── train.py
+│   ├── export.py
+│   └── health_check.py
+│
+└── tests/
+    └── test_integration.py   # 集成测试
+```
+
+## 快速开始
+
+### 环境要求
+
+- Python >= 3.10
+- Node.js >= 18
+- NVIDIA GPU（YOLO-World + Moondream2 需要 CUDA）
+- CUDA >= 11.8（for PyTorch）
+
+### 1. 克隆项目
+
+```bash
+git clone https://github.com/<your-username>/CV_Auto_Trainer.git
+cd CV_Auto_Trainer
+```
+
+### 2. 安装后端依赖
+
+```bash
+cd backend
+pip install -r requirements.txt
+```
+
+### 3. 安装 Worker 依赖（GPU 打标）
+
+```bash
+cd worker
+pip install -r requirements.txt
+```
+
+### 4. 安装前端依赖
+
+```bash
+cd frontend
+npm install
+```
+
+### 5. 启动服务
+
+```bash
+# 终端 1：后端 API
+cd backend
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
+
+# 终端 2：本地 Worker（GPU 打标 + 本地训练）
+cd worker
+python main.py
+
+# 终端 3：前端开发服务器
+cd frontend
+npm run dev -- --host 0.0.0.0
+```
+
+访问 `http://localhost:5173`
+
+### 6. 配置
+
+在 Settings 面板中配置：
+
+| 配置项 | 说明 |
+|--------|------|
+| VLM Provider | OpenAI / Kimi / Gemini |
+| API Key | 对应 provider 的密钥 |
+| 训练模式 | 本地（subprocess）/ 云端（SSH / AutoDL） |
+
+## 训练模式
+
+### 本地训练
+
+使用本机 NVIDIA GPU，通过 subprocess.Popen 启动独立训练子进程，显存与 Worker 主进程隔离。
+
+### 云端训练（通用 SSH）
+
+连接任意提供 SSH 访问的 GPU 服务器（阿里云 / 腾讯云 / AWS / 自有服务器）。需要配置 SSH 连接信息。
+
+### 云端训练（AutoDL）
+
+通过 AutoDL OpenAPI 自动创建和销毁 GPU 实例，用户只需提供 Token。
+
+## 运行测试
+
+```bash
+# 全部测试（需要 GPU）
+python tests/test_integration.py
+
+# 后端导入测试
+python tests/test_integration.py backend-imports
+
+# 前端构建测试
+python tests/test_integration.py frontend-build
+```
+
+## 架构设计要点
+
+### 两段式打标
+
+阶段二使用两个独立模型，显存必须分阶段释放：
+
+```
+第一段：YOLO-World 推理（FP16）
+  → 输出 raw_boxes.json
+  → del model → torch.cuda.empty_cache() → gc.collect()
+
+第二段：Moondream2 VQA 质检
+  → 三维度评分（清晰度/完整性/一致性）
+  → 任一维度 < 0.4 丢弃，< 0.5 中性
+  → 输出最终 YOLO .txt 标注
+```
+
+### 显存安全
+
+GTX 1650 最低仅 4GB 显存。两段之间必须彻底释放显存，绝不能同时驻留两个模型。
+
+### 兜底关机（云端）
+
+AutoDL 状态机的 `finally` 块覆盖所有退出路径，无论成功、异常、还是被中断，最多重试 3 次。
+
+## License
+
+MIT
