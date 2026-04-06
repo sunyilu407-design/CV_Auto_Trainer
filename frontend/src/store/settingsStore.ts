@@ -1,12 +1,16 @@
 import { create } from 'zustand'
 
 export type CloudProvider = 'generic' | 'autodl'
+export type VlmProvider = 'openai' | 'kimi' | 'minimax' | 'zhipu' | 'gemini' | 'claude' | 'custom'
+export type VlmApiFormat = 'openai' | 'anthropic' | 'gemini'
 
 export interface UserSettings {
   // VLM
-  vlmProvider: 'openai' | 'kimi' | 'gemini'
+  vlmProvider: VlmProvider
   vlmBaseUrl: string
   vlmApiKey: string
+  vlmApiFormat: VlmApiFormat
+  vlmModel: string
 
   // 云端训练
   cloudProvider: CloudProvider
@@ -42,6 +46,8 @@ const defaultSettings: UserSettings = {
   vlmProvider: 'openai',
   vlmBaseUrl: 'https://api.openai.com/v1',
   vlmApiKey: '',
+  vlmApiFormat: 'openai',
+  vlmModel: '',
 
   cloudProvider: 'generic',
   sshHost: '',

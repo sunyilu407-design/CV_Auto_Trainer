@@ -57,3 +57,24 @@ def update_vlm_result(task_id: str, payload: dict, db: Session = Depends(get_db)
     task.vlm_result = payload.get("classes")
     db.commit()
     return {"code": 0, "msg": "ok", "data": None}
+
+
+class VLMTestRequest(BaseModel):
+    provider: str
+    base_url: str
+    api_key: str
+    api_format: Optional[str] = None
+    model: Optional[str] = None
+
+
+@router.post("/test")
+def test_connection(payload: VLMTestRequest):
+    adapter = VLMAdapter(
+        provider=payload.provider,
+        base_url=payload.base_url,
+        api_key=payload.api_key,
+        api_format=payload.api_format,
+        model=payload.model,
+    )
+    result = adapter.test_connection()
+    return {"code": 0, "msg": "ok", "data": result}

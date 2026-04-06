@@ -59,6 +59,8 @@ class UserSettings(Base):
     vlm_provider = Column(String, default="openai")
     vlm_base_url = Column(String, default="https://api.openai.com/v1")
     vlm_api_key_encrypted = Column(String)
+    vlm_api_format = Column(String, default="openai")  # openai | anthropic | gemini
+    vlm_model = Column(String)  # 自定义模型名（custom/claude 时使用）
 
     # 云端训练通用配置
     cloud_provider = Column(String, default="generic")

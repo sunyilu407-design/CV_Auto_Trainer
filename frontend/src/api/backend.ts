@@ -67,6 +67,17 @@ export const vlmApi = {
       method: 'PUT',
       body: JSON.stringify({ classes }),
     }),
+  test: (params: {
+    provider: string
+    base_url: string
+    api_key: string
+    api_format?: string
+    model?: string
+  }) =>
+    request<{ success: boolean; message: string }>('/vlm/test', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
 }
 
 // Training APIs
@@ -131,6 +142,8 @@ export interface UserSettings {
   vlm_provider: string
   vlm_base_url: string
   vlm_api_key: string
+  vlm_api_format: string
+  vlm_model: string
   cloud_provider: string
   ssh_host: string
   ssh_port: number

@@ -1,14 +1,59 @@
 import { useState } from 'react'
-import { useSettingsStore } from '../store/settingsStore'
+import { useSettingsStore, VlmProvider, VlmApiFormat } from '../store/settingsStore'
+import { vlmApi } from '../api/backend'
 
 interface Props {
   onClose: () => void
+}
+
+// Provider 默认配置（使用各厂家最新多模态模型，2026年4月）
+const PROVIDER_DEFAULTS: Record<VlmProvider, { baseUrl: string; apiFormat: VlmApiFormat; model: string }> = {
+  openai: { baseUrl: 'https://api.openai.com/v1', apiFormat: 'openai', model: 'gpt-4.1' },
+  kimi: { baseUrl: 'https://api.moonshot.cn/v1', apiFormat: 'openai', model: 'kimi-k2.5' },
+  minimax: { baseUrl: 'https://api.minimax.chat/v1', apiFormat: 'openai', model: 'MiniMax-M2.7' },
+  zhipu: { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', apiFormat: 'openai', model: 'glm-4v-plus' },
+  gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', apiFormat: 'gemini', model: 'gemini-2.5-flash' },
+  claude: { baseUrl: 'https://api.anthropic.com/v1', apiFormat: 'anthropic', model: 'claude-sonnet-4-6' },
+  custom: { baseUrl: '', apiFormat: 'openai', model: '' },
 }
 
 export default function SettingsPanel({ onClose }: Props) {
   const { settings, setSettings, saveSettings } = useSettingsStore()
   const [activeTab, setActiveTab] = useState<'vlm' | 'cloud' | 'general'>('vlm')
   const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
+
+  const handleProviderChange = (provider: VlmProvider) => {
+    const defaults = PROVIDER_DEFAULTS[provider]
+    setSettings({
+      vlmProvider: provider,
+      vlmBaseUrl: defaults.baseUrl,
+      vlmApiFormat: defaults.apiFormat,
+      vlmModel: defaults.model,
+    })
+    setTestResult(null)
+  }
+
+  const handleTest = async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const result = await vlmApi.test({
+        provider: settings.vlmProvider,
+        base_url: settings.vlmBaseUrl,
+        api_key: settings.vlmApiKey,
+        api_format: settings.vlmApiFormat,
+        model: settings.vlmModel,
+      })
+      setTestResult(result)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '测试失败'
+      setTestResult({ success: false, message: msg })
+    } finally {
+      setTesting(false)
+    }
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -19,6 +64,8 @@ export default function SettingsPanel({ onClose }: Props) {
       setSaving(false)
     }
   }
+
+  const showCustomFields = settings.vlmProvider === 'custom' || settings.vlmProvider === 'claude' || settings.vlmProvider === 'openai' || settings.vlmProvider === 'kimi' || settings.vlmProvider === 'minimax' || settings.vlmProvider === 'zhipu' || settings.vlmProvider === 'gemini'
 
   return (
     <div
@@ -101,14 +148,45 @@ export default function SettingsPanel({ onClose }: Props) {
                 <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>VLM Provider</label>
                 <select
                   value={settings.vlmProvider}
-                  onChange={(e) => setSettings({ vlmProvider: e.target.value as typeof settings.vlmProvider })}
+                  onChange={(e) => handleProviderChange(e.target.value as VlmProvider)}
                   style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
                 >
                   <option value="openai">OpenAI (GPT-4o)</option>
-                  <option value="kimi">Kimi (moonshot-v1-8k)</option>
-                  <option value="gemini">Gemini (gemini-1.5-pro)</option>
+                  <option value="kimi">Kimi (moonshot-v1-32k)</option>
+                  <option value="minimax">MiniMax (minimax-v-01)</option>
+                  <option value="zhipu">智谱 GLM-4V</option>
+                  <option value="gemini">Google Gemini</option>
+                  <option value="claude">Anthropic Claude</option>
+                  <option value="custom">自定义 / 中转代理</option>
                 </select>
               </div>
+
+              {showCustomFields && (
+                <>
+                  <div>
+                    <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>API 格式</label>
+                    <select
+                      value={settings.vlmApiFormat}
+                      onChange={(e) => setSettings({ vlmApiFormat: e.target.value as VlmApiFormat })}
+                      style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+                    >
+                      <option value="openai">OpenAI 兼容 (/v1/chat/completions)</option>
+                      <option value="anthropic">Anthropic (/v1/messages)</option>
+                      <option value="gemini">Google Gemini</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>模型名称</label>
+                    <input
+                      value={settings.vlmModel}
+                      onChange={(e) => setSettings({ vlmModel: e.target.value })}
+                      placeholder="输入模型名称，如 gpt-4o-2024-11-20"
+                      style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                </>
+              )}
+
               <div>
                 <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>Base URL</label>
                 <input
@@ -127,6 +205,35 @@ export default function SettingsPanel({ onClose }: Props) {
                   placeholder="sk-..."
                   style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
                 />
+              </div>
+
+              {/* 测试按钮和结果 */}
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <button
+                  onClick={handleTest}
+                  disabled={testing || !settings.vlmApiKey}
+                  style={{
+                    padding: '8px 20px',
+                    background: testing ? '#ccc' : '#4caf50',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: testing || !settings.vlmApiKey ? 'not-allowed' : 'pointer',
+                    fontSize: '14px',
+                  }}
+                >
+                  {testing ? '测试中...' : '测试连接'}
+                </button>
+                {testResult && (
+                  <span
+                    style={{
+                      color: testResult.success ? '#4caf50' : '#f44336',
+                      fontSize: '14px',
+                    }}
+                  >
+                    {testResult.message}
+                  </span>
+                )}
               </div>
             </div>
           )}
