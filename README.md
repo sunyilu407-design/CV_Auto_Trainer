@@ -76,8 +76,10 @@ CV_Auto_Trainer/
 
 - Python >= 3.10
 - Node.js >= 18
-- NVIDIA GPU（YOLO-World + Moondream2 需要 CUDA）
-- CUDA >= 11.8（for PyTorch）
+- **NVIDIA GPU**（Linux/Windows，CUDA >= 11.8）
+- **或 Apple M1/M2/M3/M4 Mac**（使用 MPS 加速，见 [MAC.md](MAC.md)）
+
+> Mac 支持用于画框打标阶段。云端训练和 VLM 解析不依赖本地 GPU。
 
 ### 1. 克隆项目
 
@@ -124,6 +126,10 @@ npm run dev -- --host 0.0.0.0
 ```
 
 访问 `http://localhost:5173`
+
+### Mac（M1/M2/M3）用户
+
+请参考 [MAC.md](MAC.md) 获取完整的 Mac 安装与配置指南。
 
 ### 6. 配置
 

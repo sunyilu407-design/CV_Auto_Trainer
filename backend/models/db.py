@@ -61,6 +61,9 @@ class UserSettings(Base):
     vlm_api_key_encrypted = Column(String)
     vlm_api_format = Column(String, default="openai")  # openai | anthropic | gemini
     vlm_model = Column(String)  # 自定义模型名（custom/claude 时使用）
+    vlm_temperature = Column(Float, default=0.7)
+    vlm_top_p = Column(Float, default=0.7)
+    vlm_stop = Column(String)  # JSON 数组字符串，如 "[\"###\"]"
 
     # 云端训练通用配置
     cloud_provider = Column(String, default="generic")

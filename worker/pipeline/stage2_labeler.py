@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 from typing import Optional, Callable
-from pipeline.gpu_manager import gpu_stage, check_cancel_and_yield, CancelError
+from pipeline.gpu_manager import gpu_stage, check_cancel_and_yield, CancelError, get_device
 
 
 def run_detection(
@@ -24,8 +24,11 @@ def run_detection(
         with gpu_stage("yolo_detection", required_gb=3.0):
             from ultralytics import YOLOWorld
 
+            device = get_device()
             model = YOLOWorld("yolov8s-world.pt")
-            model.half()  # FP16 半精度
+            if device in ("cuda", "mps"):
+                model.half()  # FP16 半精度
+                model.to(device)
             model.set_classes([c["prompt"] for c in classes])
 
             image_paths = (
@@ -91,11 +94,14 @@ def run_quality_check(
             from transformers import AutoModelForCausalLM, AutoTokenizer
             import cv2
 
+            device = get_device()
+            dtype = torch.float16 if device != "cpu" else torch.float32
+
             model = AutoModelForCausalLM.from_pretrained(
                 "vikhyatk/moondream2",
                 trust_remote_code=True,
-                torch_dtype=torch.float16,
-            ).cuda()
+                torch_dtype=dtype,
+            ).to(device)
             tokenizer = AutoTokenizer.from_pretrained(
                 "vikhyatk/moondream2",
                 trust_remote_code=True,

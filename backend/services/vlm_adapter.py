@@ -89,7 +89,14 @@ class VLMBackend(ABC):
     """VLM 后端抽象基类"""
 
     @abstractmethod
-    def call_api(self, messages: list, max_tokens: int = 1024) -> str:
+    def call_api(
+        self,
+        messages: list,
+        max_tokens: int = 1024,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[list[str]] = None,
+    ) -> str:
         """调用 API，返回原始响应内容"""
         pass
 
@@ -117,12 +124,25 @@ class OpenAICompatibleBackend(VLMBackend):
         self.api_key = api_key
         self.model = model
 
-    def call_api(self, messages: list, max_tokens: int = 1024) -> str:
-        payload = {
+    def call_api(
+        self,
+        messages: list,
+        max_tokens: int = 1024,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[list[str]] = None,
+    ) -> str:
+        payload: dict = {
             "model": self.model,
             "messages": messages,
             "max_tokens": max_tokens,
         }
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if stop:
+            payload["stop"] = stop
         resp = httpx.post(
             f"{self.base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -163,7 +183,14 @@ class AnthropicBackend(VLMBackend):
         self.api_key = api_key
         self.model = model
 
-    def call_api(self, messages: list, max_tokens: int = 1024) -> str:
+    def call_api(
+        self,
+        messages: list,
+        max_tokens: int = 1024,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[list[str]] = None,
+    ) -> str:
         # Anthropic 格式：分离 system 和 user messages
         system_content = ""
         user_messages = []
@@ -173,13 +200,19 @@ class AnthropicBackend(VLMBackend):
             else:
                 user_messages.append(msg)
 
-        payload = {
+        payload: dict = {
             "model": self.model,
             "messages": user_messages,
             "max_tokens": max_tokens,
         }
         if system_content:
             payload["system"] = system_content
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if stop:
+            payload["stop_sequences"] = stop
 
         headers = {
             "x-api-key": self.api_key,
@@ -312,6 +345,9 @@ class VLMAdapter:
         api_key: str,
         api_format: Optional[str] = None,
         model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[list[str]] = None,
     ):
         self.provider = provider
         self.base_url = base_url.rstrip("/")
@@ -325,6 +361,11 @@ class VLMAdapter:
 
         # 模型名：优先使用传入值，否则用 provider 默认
         self.model = model or config.get("model", "gpt-4o")
+
+        # 生成参数
+        self.temperature = temperature
+        self.top_p = top_p
+        self.stop = stop
 
         # 如果 base_url 为空，使用默认值
         if not self.base_url:
@@ -375,7 +416,12 @@ class VLMAdapter:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ]
-        return self.backend.call_api(messages)
+        return self.backend.call_api(
+            messages,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            stop=self.stop,
+        )
 
     def _parse_and_validate(self, raw: str) -> dict:
         match = re.search(r"```json\s*([\s\S]*?)```", raw)

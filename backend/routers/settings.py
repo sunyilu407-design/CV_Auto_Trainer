@@ -22,6 +22,9 @@ def get_settings_api(db: Session = Depends(get_db)):
             "vlm_api_key": decrypt_value(settings.vlm_api_key_encrypted) if settings.vlm_api_key_encrypted else "",
             "vlm_api_format": settings.vlm_api_format or "openai",
             "vlm_model": settings.vlm_model or "",
+            "vlm_temperature": settings.vlm_temperature or 0.7,
+            "vlm_top_p": settings.vlm_top_p or 0.7,
+            "vlm_stop": settings.vlm_stop or "",
             "cloud_provider": settings.cloud_provider,
             "ssh_host": settings.ssh_host or "",
             "ssh_port": settings.ssh_port,
@@ -45,6 +48,9 @@ class SettingsUpdateRequest(BaseModel):
     vlm_api_key: Optional[str] = None
     vlm_api_format: Optional[str] = None
     vlm_model: Optional[str] = None
+    vlm_temperature: Optional[float] = None
+    vlm_top_p: Optional[float] = None
+    vlm_stop: Optional[str] = None
     cloud_provider: Optional[str] = None
     ssh_host: Optional[str] = None
     ssh_port: Optional[int] = None
