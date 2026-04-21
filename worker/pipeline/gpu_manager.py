@@ -32,6 +32,11 @@ def get_free_memory_gb() -> float:
         return psutil.virtual_memory().available / 1e9
 
 
+def should_enforce_memory_guard(device: str = None) -> bool:
+    current_device = device or get_device()
+    return current_device == "cuda"
+
+
 class CancelError(Exception):
     """推理循环中检测到取消标志时抛出"""
     pass
@@ -47,7 +52,7 @@ def gpu_stage(stage_name: str, required_gb: float = 2.0):
     """
     device = get_device()
 
-    if device in ("cuda", "mps"):
+    if should_enforce_memory_guard(device):
         free_gb = get_free_memory_gb()
         if free_gb < required_gb:
             raise MemoryError(

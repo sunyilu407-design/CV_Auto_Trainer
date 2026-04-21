@@ -1,0 +1,371 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1776150506036,
+  "projectRoot": "/Users/ahs/work/CV_Auto_Trainer/CV_Auto_Trainer",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "backend": {
+      "path": "backend",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1776150506026,
+      "keyFiles": [
+        "__init__.py",
+        "cv_auto_trainer.db",
+        "main.py",
+        "requirements.txt"
+      ]
+    },
+    "cloud_scripts": {
+      "path": "cloud_scripts",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1776150506026,
+      "keyFiles": [
+        "export.py",
+        "health_check.py",
+        "train.py"
+      ]
+    },
+    "frontend": {
+      "path": "frontend",
+      "purpose": null,
+      "fileCount": 6,
+      "lastAccessed": 1776150506026,
+      "keyFiles": [
+        "index.html",
+        "package-lock.json",
+        "package.json",
+        "tsconfig.json",
+        "tsconfig.node.json"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 2,
+      "lastAccessed": 1776150506027,
+      "keyFiles": [
+        "__init__.py",
+        "test_integration.py"
+      ]
+    },
+    "worker": {
+      "path": "worker",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1776150506027,
+      "keyFiles": [
+        "__init__.py",
+        "main.py",
+        "requirements.txt"
+      ]
+    },
+    "backend/models": {
+      "path": "backend/models",
+      "purpose": "Data models",
+      "fileCount": 3,
+      "lastAccessed": 1776150506027,
+      "keyFiles": [
+        "__init__.py",
+        "database.py",
+        "db.py"
+      ]
+    },
+    "backend/services": {
+      "path": "backend/services",
+      "purpose": "Business logic services",
+      "fileCount": 8,
+      "lastAccessed": 1776150506027,
+      "keyFiles": [
+        "__init__.py",
+        "alert_manager.py",
+        "autodl_trainer.py"
+      ]
+    },
+    "frontend/node_modules": {
+      "path": "frontend/node_modules",
+      "purpose": "Dependencies",
+      "fileCount": 1,
+      "lastAccessed": 1776150506027,
+      "keyFiles": []
+    },
+    "frontend/src": {
+      "path": "frontend/src",
+      "purpose": "Source code",
+      "fileCount": 3,
+      "lastAccessed": 1776150506027,
+      "keyFiles": [
+        "App.tsx",
+        "main.tsx",
+        "vite-env.d.ts"
+      ]
+    },
+    "worker/utils": {
+      "path": "worker/utils",
+      "purpose": "Utility functions",
+      "fileCount": 3,
+      "lastAccessed": 1776150506027,
+      "keyFiles": [
+        "__init__.py",
+        "dataset_splitter.py",
+        "yolo_io.py"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "frontend/src/App.tsx",
+      "accessCount": 11,
+      "lastAccessed": 1776165465876,
+      "type": "file"
+    },
+    {
+      "path": "backend/routers/settings.py",
+      "accessCount": 8,
+      "lastAccessed": 1776165548643,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/store/settingsStore.ts",
+      "accessCount": 7,
+      "lastAccessed": 1776165590492,
+      "type": "file"
+    },
+    {
+      "path": "backend/routers/auth.py",
+      "accessCount": 7,
+      "lastAccessed": 1776165916673,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/components/SettingsPanel.tsx",
+      "accessCount": 6,
+      "lastAccessed": 1776164247323,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/components/GpuMonitor.tsx",
+      "accessCount": 5,
+      "lastAccessed": 1776159762850,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/components/AugPreview.tsx",
+      "accessCount": 5,
+      "lastAccessed": 1776160989203,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/components/MetricsChart.tsx",
+      "accessCount": 5,
+      "lastAccessed": 1776160989220,
+      "type": "file"
+    },
+    {
+      "path": "backend/models/db.py",
+      "accessCount": 5,
+      "lastAccessed": 1776164262967,
+      "type": "file"
+    },
+    {
+      "path": "backend/main.py",
+      "accessCount": 5,
+      "lastAccessed": 1776165502120,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/pages/Upload.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1776159184185,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/pages/IntentConfirm.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1776159184513,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/pages/ReviewSamples.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1776159380450,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/pages/TrainConfig.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1776159380789,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/pages/TrainingMonitor.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1776159381115,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/pages/Delivery.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1776159381435,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/components/AnnotationCanvas.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1776159763797,
+      "type": "file"
+    },
+    {
+      "path": "frontend",
+      "accessCount": 3,
+      "lastAccessed": 1776151040181,
+      "type": "directory"
+    },
+    {
+      "path": "frontend/src",
+      "accessCount": 3,
+      "lastAccessed": 1776155371031,
+      "type": "directory"
+    },
+    {
+      "path": "frontend/src/pages/LabelingProgress.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1776159094684,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/pages/AugmentConfig.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1776159095012,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/settings_manager.py",
+      "accessCount": 3,
+      "lastAccessed": 1776164252263,
+      "type": "file"
+    },
+    {
+      "path": "frontend/vite.config.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776165483670,
+      "type": "file"
+    },
+    {
+      "path": "backend",
+      "accessCount": 2,
+      "lastAccessed": 1776151068417,
+      "type": "directory"
+    },
+    {
+      "path": "backend/models/database.py",
+      "accessCount": 2,
+      "lastAccessed": 1776161196352,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/store/authStore.ts",
+      "accessCount": 2,
+      "lastAccessed": 1776164177478,
+      "type": "file"
+    },
+    {
+      "path": "API 接口文档.md",
+      "accessCount": 1,
+      "lastAccessed": 1776150520043,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/api/backend.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776150539735,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/vlm_adapter.py",
+      "accessCount": 1,
+      "lastAccessed": 1776150554441,
+      "type": "file"
+    },
+    {
+      "path": "backend/routers/vlm.py",
+      "accessCount": 1,
+      "lastAccessed": 1776150554497,
+      "type": "file"
+    },
+    {
+      "path": "frontend/package.json",
+      "accessCount": 1,
+      "lastAccessed": 1776151091123,
+      "type": "file"
+    },
+    {
+      "path": "backend/routers/__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1776154008211,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/main.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1776155382185,
+      "type": "file"
+    },
+    {
+      "path": "vercel.DESIGN.md",
+      "accessCount": 1,
+      "lastAccessed": 1776158096189,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/store/taskStore.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776158699653,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/styles/globals.css",
+      "accessCount": 1,
+      "lastAccessed": 1776158821762,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/pages/Login.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1776161314439,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

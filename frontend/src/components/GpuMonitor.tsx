@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { WORKER_HTTP_BASE } from '../api/worker'
 
 interface GpuInfo {
   available: boolean
@@ -14,7 +15,7 @@ export default function GpuMonitor() {
   useEffect(() => {
     const fetchGpu = async () => {
       try {
-        const res = await fetch('http://localhost:7860/gpu-info')
+        const res = await fetch(`${WORKER_HTTP_BASE}/gpu-info`)
         const data = await res.json()
         setGpu(data)
       } catch {
@@ -29,8 +30,25 @@ export default function GpuMonitor() {
 
   if (!gpu || !gpu.available) {
     return (
-      <div style={{ textAlign: 'center', color: '#999', padding: '16px' }}>
-        未检测到 GPU 或 Worker 未启动
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          padding: '24px 20px',
+          background: 'var(--gray-50)',
+          borderRadius: 8,
+          border: '1px solid var(--gray-100)',
+        }}
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="1.5">
+          <rect x="2" y="3" width="20" height="14" rx="2"/>
+          <line x1="8" y1="21" x2="16" y2="21"/>
+          <line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+        <span style={{ fontSize: 13, color: 'var(--gray-400)' }}>未检测到 GPU 或 Worker 未启动</span>
       </div>
     )
   }
@@ -39,35 +57,81 @@ export default function GpuMonitor() {
     ? Math.round((gpu.usedMemoryGB! / gpu.totalMemoryGB!) * 100)
     : 0
 
+  const memColor = usedPercent > 90 ? 'var(--ship-red)' : usedPercent > 70 ? '#f59e0b' : 'var(--develop-blue)'
+
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-        <span style={{ fontSize: '14px', fontWeight: 600 }}>{gpu.name}</span>
-        <span style={{ fontSize: '14px', color: '#666' }}>
-          {gpu.freeMemoryGB?.toFixed(1)} GB 可用 / {gpu.totalMemoryGB?.toFixed(1)} GB 总计
+    <div
+      style={{
+        padding: '16px 20px',
+        background: 'var(--gray-50)',
+        borderRadius: 8,
+        border: '1px solid var(--gray-100)',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              background: `${memColor}15`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={memColor} strokeWidth="2">
+              <rect x="2" y="3" width="20" height="14" rx="2"/>
+              <line x1="8" y1="21" x2="16" y2="21"/>
+              <line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+          </div>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-700)' }}>{gpu.name}</span>
+        </div>
+        <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
+          {gpu.freeMemoryGB?.toFixed(1)} GB{' '}
+          <span style={{ color: 'var(--gray-300)' }}>/</span>{' '}
+          {gpu.totalMemoryGB?.toFixed(1)} GB
         </span>
       </div>
+
+      {/* Progress bar */}
       <div
         style={{
-          width: '100%',
-          height: '16px',
-          background: '#e0e0e0',
-          borderRadius: '8px',
+          height: 6,
+          borderRadius: 3,
+          background: 'var(--gray-200)',
           overflow: 'hidden',
+          marginBottom: 8,
         }}
       >
         <div
           style={{
             width: `${usedPercent}%`,
             height: '100%',
-            background: usedPercent > 90 ? '#d32f2f' : usedPercent > 70 ? '#ff9800' : '#4caf50',
-            transition: 'width 0.5s',
+            background: memColor,
+            borderRadius: 3,
+            transition: 'width 0.5s ease',
           }}
         />
       </div>
-      <p style={{ fontSize: '12px', color: '#666', marginTop: '4px', textAlign: 'right' }}>
-        已用 {gpu.usedMemoryGB?.toFixed(1)} GB ({usedPercent}%)
-      </p>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
+          已用 {gpu.usedMemoryGB?.toFixed(1)} GB
+        </span>
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: memColor,
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {usedPercent}%
+        </span>
+      </div>
     </div>
   )
 }

@@ -3,6 +3,7 @@ import shutil
 import os
 from pathlib import Path
 from collections import defaultdict, Counter
+from utils.image_files import find_image_for_stem
 
 
 def split_dataset(
@@ -25,10 +26,8 @@ def split_dataset(
 
     class_groups: dict = defaultdict(list)
     for lbl_path in Path(label_dir).glob("*.txt"):
-        img_path = Path(image_dir) / f"{lbl_path.stem}.jpg"
-        if not img_path.exists():
-            img_path = Path(image_dir) / f"{lbl_path.stem}.png"
-        if not img_path.exists():
+        img_path = find_image_for_stem(image_dir, lbl_path.stem)
+        if img_path is None:
             continue
         dominant_class = _get_dominant_class(lbl_path)
         class_groups[dominant_class].append((img_path, lbl_path))

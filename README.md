@@ -131,6 +131,104 @@ npm run dev -- --host 0.0.0.0
 
 请参考 [MAC.md](MAC.md) 获取完整的 Mac 安装与配置指南。
 
+## 正式部署（单机）
+
+适用场景：
+
+- 本地画框、质检、增强
+- 系统内部发起云端训练（SSH / AutoDL）
+- 训练完成后直接下载模型产物和算法工程包
+
+正式部署不再依赖 Vite 开发服务器。推荐使用：
+
+- PostgreSQL 作为数据库
+- 后端托管 `frontend/dist`
+- Worker 仅监听本机端口
+
+### 必备环境变量
+
+```bash
+CV_AUTO_TRAINER_DB_URL=postgresql://postgres:postgres@127.0.0.1:5432/cv_auto_trainer
+CV_AUTO_TRAINER_SECRET_KEY=replace-this-with-a-stable-secret
+CV_AUTO_TRAINER_ADMIN_USERNAME=admin
+CV_AUTO_TRAINER_ADMIN_PASSWORD=change-me
+CV_AUTO_TRAINER_FRONTEND_DIST=/absolute/path/to/frontend/dist
+CV_AUTO_TRAINER_CORS_ORIGINS=http://127.0.0.1:8000,http://localhost:8000
+```
+
+### 单机正式部署步骤
+
+```bash
+# 1. 构建前端
+cd frontend
+npm install
+npm run build
+
+# 2. 启动后端（托管前端 dist）
+cd ../backend
+python -m uvicorn main:app --host 127.0.0.1 --port 8000
+
+# 3. 启动本地 Worker（画框 / 质检 / 增强）
+cd ../worker
+python main.py
+```
+
+部署完成后，直接访问：
+
+```text
+http://127.0.0.1:8000/
+```
+
+平台细节请参考：
+
+- [MAC.md](MAC.md)
+- [WINDOWS.md](WINDOWS.md)
+- [MANUAL_CLOUD_TRAINING.md](MANUAL_CLOUD_TRAINING.md)
+
+### PostgreSQL 初始化
+
+如果你已经安装好了 PostgreSQL，macOS 下可以直接运行：
+
+```bash
+./scripts/init_postgres_macos.sh
+```
+
+这个脚本会：
+
+- 创建数据库用户（默认 `cv_auto_trainer`）
+- 创建数据库（默认 `cv_auto_trainer`）
+- 打印 `CV_AUTO_TRAINER_DB_URL`
+
+表结构不需要单独跑 SQL 文件。后端启动时会自动执行：
+
+- `Base.metadata.create_all(...)`
+- 轻量级 `ALTER TABLE` 补列逻辑
+
+也就是说：**你只需要先把数据库创建出来，表会在后端第一次启动时自动建好。**
+
+### 云训练连接失败时的手动兜底
+
+如果系统一时无法直接连上用户租用的云训练环境，不建议让用户先盲目开机再排查。
+
+推荐做法：
+
+1. 本地先完成数据整理
+2. 先生成“手动云训练包”
+3. 确认 SSH / SCP 可用
+4. 再让用户启动付费云实例
+
+生成命令：
+
+```bash
+python scripts/prepare_manual_cloud_training.py \
+  --dataset-dir backend/uploads/<task_id>/dataset \
+  --output-dir /tmp/cv_manual_training
+```
+
+完整教程见：
+
+- [MANUAL_CLOUD_TRAINING.md](MANUAL_CLOUD_TRAINING.md)
+
 ### 6. 配置
 
 在 Settings 面板中配置：

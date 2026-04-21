@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import signal
 import subprocess
@@ -62,18 +63,18 @@ class LocalTrainer:
         patience = cfg.get("patience", 20)
         project = str(Path(self._output_dir).parent)
         resume_str = (
-            [f"--resume={self._output_dir / 'weights' / 'last.pt'}"]
-            if cfg.get("resume_last", False) else []
+            f", resume='{self._output_dir / 'weights' / 'last.pt'}'"
+            if cfg.get("resume_last", False) else ""
         )
 
         cmd = [
-            "python", "-c",
+            sys.executable, "-c",
             f"from ultralytics import YOLO; "
             f"model = YOLO('{model}'); "
             f"model.train(data='{data_yaml}', "
             f"epochs={epochs}, imgsz={imgsz}, lr0={lr0}, "
             f"patience={patience}, project='{project}', "
-            f"name='exp', exist_ok=True, device=0)",
+            f"name='exp', exist_ok=True, device=0{resume_str})",
         ]
         return cmd
 
@@ -94,7 +95,15 @@ class LocalTrainer:
                     lines = f.readlines()
                 if not lines:
                     continue
-                last_line = lines[-1].strip()
+                # Find last non-header data line
+                last_line = ""
+                for candidate in reversed(lines):
+                    stripped = candidate.strip()
+                    if stripped and not stripped.startswith("epoch"):
+                        last_line = stripped
+                        break
+                if not last_line:
+                    continue
                 parts = last_line.split(",")
                 if len(parts) > 3:
                     current_epoch = int(parts[0].strip())

@@ -5,6 +5,7 @@ import os
 import shutil
 from pathlib import Path
 from typing import Optional, Callable
+from utils.image_files import list_image_files
 
 
 def build_pipeline(
@@ -87,10 +88,7 @@ def augment_dataset(
     os.makedirs(output_image_dir, exist_ok=True)
     os.makedirs(output_label_dir, exist_ok=True)
 
-    src_images = (
-        list(Path(src_image_dir).glob("*.jpg")) +
-        list(Path(src_image_dir).glob("*.png"))
-    )
+    src_images = list_image_files(src_image_dir)
     if not src_images:
         raise ValueError(f"源目录无图片: {src_image_dir}")
 

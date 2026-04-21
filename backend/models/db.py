@@ -1,9 +1,11 @@
 from sqlalchemy import Column, String, Integer, Float, JSON, DateTime, Boolean, Text
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import DeclarativeBase
 import uuid as uuid_lib
-from datetime import datetime
+from datetime import datetime, timezone
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
 
 
 class Task(Base):
@@ -11,13 +13,21 @@ class Task(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid_lib.uuid4()))
     name = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     status = Column(String, default="created")
+    owner_user_id = Column(Integer, nullable=True)
 
     # 阶段一
     vlm_result = Column(JSON)
+    algorithm_plan = Column(JSON)
+    algorithm_plan_status = Column(String, default="draft")
+    pipeline_config = Column(JSON)
+    negotiation_summary = Column(JSON)
+    offline_evaluation = Column(JSON)
+    training_plan = Column(JSON)
+    delivery_package = Column(JSON)
 
     # 阶段二统计
     raw_image_count = Column(Integer, default=0)
@@ -43,6 +53,10 @@ class Task(Base):
     best_map50 = Column(Float)
     best_map50_95 = Column(Float)
     artifact_paths = Column(JSON)
+    training_state = Column(String, default="idle")
+    training_progress = Column(JSON)
+    training_started_at = Column(DateTime)
+    training_finished_at = Column(DateTime)
     error_message = Column(Text)
 
     # 文件路径
@@ -51,10 +65,22 @@ class Task(Base):
     dataset_dir = Column(String)
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, default="user")  # admin | user
+    token_version = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class UserSettings(Base):
     __tablename__ = "user_settings"
 
     id = Column(Integer, primary_key=True, default=1)
+    user_id = Column(Integer, nullable=True)
 
     vlm_provider = Column(String, default="openai")
     vlm_base_url = Column(String, default="https://api.openai.com/v1")

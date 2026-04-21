@@ -1,4 +1,14 @@
-const WS_BASE = 'ws://localhost:7860'
+const WORKER_HOST =
+  (import.meta.env.VITE_WORKER_HOST as string | undefined)?.trim() ||
+  `${window.location.hostname}:7860`
+
+export const WORKER_HTTP_BASE =
+  (import.meta.env.VITE_WORKER_HTTP_URL as string | undefined)?.trim() ||
+  `${window.location.protocol === 'https:' ? 'https' : 'http'}://${WORKER_HOST}`
+
+const WS_BASE =
+  (import.meta.env.VITE_WORKER_WS_URL as string | undefined)?.trim() ||
+  `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${WORKER_HOST}/ws`
 
 export type WorkerMessageType =
   | 'progress'
@@ -23,6 +33,7 @@ class WorkerClient {
   private handlers: Set<MessageHandler> = new Set()
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private pingTimer: ReturnType<typeof setInterval> | null = null
+  private pendingMessages: unknown[] = []
   private lastPong = 0
   private url: string
 
@@ -38,6 +49,10 @@ class WorkerClient {
     this.ws.onopen = () => {
       this.lastPong = Date.now()
       this.startPing()
+      this.pendingMessages.forEach((message) => {
+        this.ws?.send(JSON.stringify(message))
+      })
+      this.pendingMessages = []
     }
 
     this.ws.onmessage = (event) => {
@@ -92,7 +107,9 @@ class WorkerClient {
   send(data: unknown) {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data))
+      return
     }
+    this.pendingMessages.push(data)
   }
 
   onMessage(handler: MessageHandler) {

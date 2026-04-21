@@ -1,9 +1,20 @@
 import time
 import os
-import requests
+import httpx
 import paramiko
 from typing import Optional, Callable
-from .cloud_trainer import CloudTrainer, CloudTrainState
+from .cloud_trainer import CloudTrainer, CloudTrainState, build_train_command
+
+
+class AutoDLTrainingError(RuntimeError):
+    """
+    AutoDL 训练失败异常。携带手动恢复所需的全部信息（SSH、数据集路径、训练命令等），
+    前端可据此展示手动操作教程，防止用户租用的 GPU 浪费。
+    """
+
+    def __init__(self, message: str, recovery_info: Optional[dict] = None):
+        super().__init__(message)
+        self.recovery_info = recovery_info or {}
 
 
 class AutoDLCloudTrainer(CloudTrainer):
@@ -31,8 +42,15 @@ class AutoDLCloudTrainer(CloudTrainer):
         self._ssh = self._get_ssh()
         self._sftp = self._ssh.open_sftp()
 
+    def _exec_wait(self, cmd: str, timeout: int = 300) -> tuple[str, str]:
+        """Execute a remote command and wait for it to finish."""
+        _, stdout, stderr = self._ssh.exec_command(cmd, timeout=timeout)
+        out = stdout.read().decode("utf-8", errors="replace")
+        err = stderr.read().decode("utf-8", errors="replace")
+        return out, err
+
     def _create_instance(self) -> str:
-        resp = requests.post(
+        resp = httpx.post(
             f"{self.api_base}/instance/create",
             headers={"Authorization": f"Bearer {self.token}"},
             json={"gpu_type": self.gpu_type, "image": "pytorch:2.1.0-cuda11.8"},
@@ -44,9 +62,10 @@ class AutoDLCloudTrainer(CloudTrainer):
     def _wait_for_running(self, timeout: int = 300):
         deadline = time.time() + timeout
         while time.time() < deadline:
-            resp = requests.get(
+            resp = httpx.get(
                 f"{self.api_base}/instance/status/{self._instance_id}",
                 headers={"Authorization": f"Bearer {self.token}"},
+                timeout=30,
             )
             if resp.json()["data"]["status"] == "running":
                 return
@@ -64,9 +83,10 @@ class AutoDLCloudTrainer(CloudTrainer):
         return ssh
 
     def _get_instance_info(self) -> dict:
-        resp = requests.get(
+        resp = httpx.get(
             f"{self.api_base}/instance/info/{self._instance_id}",
             headers={"Authorization": f"Bearer {self.token}"},
+            timeout=30,
         )
         resp.raise_for_status()
         return resp.json()["data"]
@@ -74,12 +94,21 @@ class AutoDLCloudTrainer(CloudTrainer):
     def upload_dataset(self, zip_path: str):
         self.state = CloudTrainState.UPLOADING
         self._sftp.put(zip_path, "/root/dataset.zip")
-        self._ssh.exec_command("cd /root && unzip -q dataset.zip -d dataset")
-        time.sleep(5)
+        self._exec_wait(
+            "cd /root && unzip -oq dataset.zip -d dataset",
+            timeout=600,
+        )
 
     def run_training(self, train_config: dict, progress_callback: Optional[Callable] = None):
         self.state = CloudTrainState.TRAINING
-        train_cmd = self._build_train_command(train_config)
+        py_code = build_train_command(
+            train_config,
+            data_yaml_path="/root/dataset/data.yaml",
+            project_dir="/root/training_output",
+            device=self.gpu_device,
+        )
+        train_cmd = f'python -c "{py_code}"'
+        self._last_train_command = train_cmd
         self._ssh.exec_command(
             f"cd /root && screen -dmS train bash -c '{train_cmd}'"
         )
@@ -91,43 +120,64 @@ class AutoDLCloudTrainer(CloudTrainer):
             if status.get("done"):
                 break
             if status.get("error"):
-                raise RuntimeError(f"训练失败: {status.get('error_msg')}")
+                raise AutoDLTrainingError(
+                    f"训练失败: {status.get('error_msg')}",
+                    recovery_info=self.get_recovery_info(train_config, error_msg=status.get("error_msg", "")),
+                )
 
-    def _build_train_command(self, cfg: dict) -> str:
-        model = cfg.get("model", "yolo11s.pt")
-        epochs = cfg.get("epochs", 100)
-        imgsz = cfg.get("imgsz", 640)
-        lr0 = cfg.get("lr0", 0.01)
-        patience = cfg.get("patience", 20)
-        project = "/root/training_output"
-        resume_str = (
-            f", resume='/root/training_output/exp/weights/last.pt'"
-            if cfg.get("resume_last", False) else ""
-        )
-        return (
-            f"python -c \"from ultralytics import YOLO; "
-            f"model = YOLO('{model}'); "
-            f"model.train(data='/root/dataset/data.yaml', "
-            f"epochs={epochs}, imgsz={imgsz}, lr0={lr0}, "
-            f"patience={patience}, project='{project}', "
-            f"name='exp', exist_ok=True, device={self.gpu_device}{resume_str})\""
-        )
+    def get_recovery_info(self, train_config: dict, error_msg: str = "") -> dict:
+        """
+        返回手动恢复所需的全部信息：SSH、数据集位置、训练命令。
+        用户可据此手动 SSH 到实例继续训练，避免已租用的 GPU 浪费。
+        """
+        info = {
+            "instance_id": self._instance_id,
+            "error_msg": error_msg,
+            "train_command": getattr(self, "_last_train_command", ""),
+            "data_yaml_path": "/root/dataset/data.yaml",
+            "project_dir": "/root/training_output",
+            "weights_path": "/root/training_output/exp/weights/best.pt",
+        }
+        try:
+            ssh_info = self._get_instance_info()
+            raw_pwd = ssh_info.get("password", "")
+            masked_pwd = (raw_pwd[:2] + "*" * max(0, len(raw_pwd) - 4) + raw_pwd[-2:]) if len(raw_pwd) > 6 else "*" * len(raw_pwd)
+            info.update({
+                "ssh_host": ssh_info.get("host"),
+                "ssh_port": ssh_info.get("port"),
+                "ssh_username": "root",
+                "ssh_password_masked": masked_pwd,
+                "autodl_console_url": f"https://www.autodl.com/console/instance/{self._instance_id}",
+            })
+        except Exception:
+            # 如果获取 SSH 信息也失败，至少给出 instance_id
+            info["ssh_retrieval_failed"] = True
+        return info
 
     def _check_training_status(self, cfg: dict) -> dict:
-        _, stdout, _ = self._ssh.exec_command(
-            "tail -1 /root/training_output/exp/results.csv 2>/dev/null"
+        # Check if the training process is still running
+        proc_out, _ = self._exec_wait(
+            "screen -ls train 2>/dev/null | grep -c train || echo 0",
+            timeout=10,
         )
-        line = stdout.read().decode().strip()
-        _, stdout2, _ = self._ssh.exec_command(
-            "[ -f /root/training_output/exp/weights/best.pt ] && echo done"
+        process_alive = proc_out.strip() not in ("", "0")
+
+        # Read last data line from results.csv (skip header)
+        csv_out, _ = self._exec_wait(
+            "tail -1 /root/training_output/exp/results.csv 2>/dev/null",
+            timeout=10,
         )
-        is_done = "done" in stdout2.read().decode()
-        _, stdout3, _ = self._ssh.exec_command(
-            "tail -5 /root/training_output/exp/train.log 2>/dev/null | grep -i error"
+        line = csv_out.strip()
+
+        # Check for errors in log
+        err_out, _ = self._exec_wait(
+            "tail -5 /root/training_output/exp/train.log 2>/dev/null | grep -i error",
+            timeout=10,
         )
-        error_line = stdout3.read().decode().strip()
+        error_line = err_out.strip()
+
         current_epoch, current_map = 0, 0.0
-        if line:
+        if line and not line.startswith("epoch"):
             parts = line.split(",")
             if len(parts) > 3:
                 try:
@@ -135,9 +185,18 @@ class AutoDLCloudTrainer(CloudTrainer):
                     current_map = float(parts[3].strip())
                 except (ValueError, IndexError):
                     pass
+
+        # Training is done when process has exited AND best.pt exists
+        best_out, _ = self._exec_wait(
+            "[ -f /root/training_output/exp/weights/best.pt ] && echo done",
+            timeout=10,
+        )
+        has_best = "done" in best_out
+        is_done = (not process_alive) and has_best
+
         return {
             "done": is_done,
-            "error": bool(error_line),
+            "error": bool(error_line) and not process_alive,
             "error_msg": error_line,
             "current_epoch": current_epoch,
             "total_epochs": cfg.get("epochs", 100),
@@ -179,8 +238,10 @@ class AutoDLCloudTrainer(CloudTrainer):
             f"\"from ultralytics import YOLO; "
             f"YOLO('{weights}').export(format='{fmt}')\""
         )
-        self._ssh.exec_command(f"cd /root && {export_cmd}")
-        time.sleep(60)
+        self._exec_wait(
+            f"cd /root && {export_cmd}",
+            timeout=600,
+        )
         remote = f"/root/training_output/exp/weights/best.{fmt}"
         local = f"{local_dir}/best.{fmt}"
         try:
@@ -193,7 +254,7 @@ class AutoDLCloudTrainer(CloudTrainer):
         self.state = CloudTrainState.SHUTTING_DOWN
         for attempt in range(3):
             try:
-                resp = requests.post(
+                resp = httpx.post(
                     f"{self.api_base}/instance/shutdown",
                     headers={"Authorization": f"Bearer {self.token}"},
                     json={"instance_id": self._instance_id},

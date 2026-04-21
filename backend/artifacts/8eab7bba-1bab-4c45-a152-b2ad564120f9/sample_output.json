@@ -1,0 +1,97 @@
+{
+  "observation_frames": [
+    {
+      "frame_index": 1,
+      "timestamp_ms": 0,
+      "detections": [
+        {
+          "class_name": "cargo_box",
+          "bbox_xywhn": [
+            0.28,
+            0.5,
+            0.12,
+            0.18
+          ],
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 2,
+      "timestamp_ms": 1000,
+      "detections": [
+        {
+          "class_name": "cargo_box",
+          "bbox_xywhn": [
+            0.5,
+            0.5,
+            0.12,
+            0.18
+          ],
+          "confidence": 0.94
+        }
+      ]
+    },
+    {
+      "frame_index": 3,
+      "timestamp_ms": 11500,
+      "detections": [
+        {
+          "class_name": "cargo_box",
+          "bbox_xywhn": [
+            0.5,
+            0.5,
+            0.12,
+            0.18
+          ],
+          "confidence": 0.93
+        }
+      ]
+    },
+    {
+      "frame_index": 4,
+      "timestamp_ms": 12500,
+      "detections": [
+        {
+          "class_name": "cargo_box",
+          "bbox_xywhn": [
+            0.72,
+            0.5,
+            0.12,
+            0.18
+          ],
+          "confidence": 0.92
+        }
+      ]
+    }
+  ],
+  "track_states": [
+    {
+      "track_id": "track-1",
+      "class_name": "cargo_box",
+      "bbox_xywhn": [
+        0.72,
+        0.5,
+        0.12,
+        0.18
+      ],
+      "confidence": 0.92,
+      "region_id": null,
+      "frame_index": 4,
+      "timestamp_ms": 12500,
+      "first_seen_frame": 1,
+      "last_seen_frame": 4,
+      "age_frames": 4,
+      "hit_streak": 4,
+      "lost_frames": 0,
+      "present_duration_ms": 12500,
+      "present_duration_seconds": 12,
+      "regions_inside": [],
+      "entered_region_at": {},
+      "last_event_frame": {},
+      "first_seen_timestamp_ms": 0,
+      "previous_regions_inside": []
+    }
+  ],
+  "events": []
+}

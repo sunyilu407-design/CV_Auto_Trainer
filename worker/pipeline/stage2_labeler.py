@@ -2,9 +2,88 @@ import torch
 import gc
 import json
 import os
-from pathlib import Path
+import re
+from urllib.error import URLError
 from typing import Optional, Callable
 from pipeline.gpu_manager import gpu_stage, check_cancel_and_yield, CancelError, get_device
+from utils.image_files import list_image_files
+
+CLIP_CACHE_DISPLAY_PATH = "~/.cache/clip/ViT-B-32.pt"
+HF_CACHE_DISPLAY_PATH = "~/.cache/huggingface/hub"
+YOLO_WORLD_WEIGHT_NAME = "yolov8s-world.pt"
+MOONDREAM_MODEL_ID = "vikhyatk/moondream2"
+
+
+class DetectionSetupError(RuntimeError):
+    """检测阶段初始化失败，通常是模型权重或网络前置条件未满足。"""
+
+
+def _is_clip_setup_error(exc: Exception) -> bool:
+    lower = str(exc).lower()
+    indicators = (
+        "openaipublic.azureedge.net",
+        "vit-b-32.pt",
+        "eof occurred in violation of protocol",
+        "ssl_error_syscall",
+        "ssl",
+        "urlopen error",
+        "operation not permitted",
+    )
+    return isinstance(exc, URLError) or any(token in lower for token in indicators)
+
+
+def _build_clip_setup_error(exc: Exception) -> DetectionSetupError:
+    return DetectionSetupError(
+        "CLIP 权重初始化失败：YOLO-World 在设置类别时需要读取/下载 CLIP 权重 ViT-B-32.pt。"
+        f" 请先将权重文件放到 {CLIP_CACHE_DISPLAY_PATH}，"
+        "或切换到可访问 openaipublic.azureedge.net 的网络后重试。"
+        f" 原始错误: {exc}"
+    )
+
+
+def _is_yolo_world_setup_error(exc: Exception) -> bool:
+    lower = str(exc).lower()
+    indicators = (
+        YOLO_WORLD_WEIGHT_NAME,
+        "github.com/ultralytics/assets",
+        "urlopen error",
+        "ssl",
+        "connection",
+        "timed out",
+    )
+    return isinstance(exc, URLError) or any(token in lower for token in indicators)
+
+
+def _build_yolo_world_setup_error(exc: Exception) -> DetectionSetupError:
+    return DetectionSetupError(
+        f"YOLO-World 权重初始化失败：Worker 在启动检测阶段时需要读取/下载 {YOLO_WORLD_WEIGHT_NAME}。"
+        f" 请先将该权重文件放到 worker 目录，或切换到可访问 GitHub/Ultralytics 资源的网络后重试。"
+        f" 原始错误: {exc}"
+    )
+
+
+def _is_moondream_setup_error(exc: Exception) -> bool:
+    lower = str(exc).lower()
+    indicators = (
+        MOONDREAM_MODEL_ID,
+        "huggingface.co",
+        "httpsconnectionpool",
+        "certificate",
+        "ssl",
+        "connection",
+        "timed out",
+        "eof occurred in violation of protocol",
+        "trust_remote_code",
+    )
+    return isinstance(exc, URLError) or any(token in lower for token in indicators)
+
+
+def _build_moondream_setup_error(exc: Exception) -> DetectionSetupError:
+    return DetectionSetupError(
+        f"Moondream2 初始化失败：第二段质检需要读取/下载模型 {MOONDREAM_MODEL_ID}。"
+        f" 请确保当前网络可访问 huggingface.co，或预先将模型缓存到 {HF_CACHE_DISPLAY_PATH} 后重试。"
+        f" 原始错误: {exc}"
+    )
 
 
 def run_detection(
@@ -25,22 +104,39 @@ def run_detection(
             from ultralytics import YOLOWorld
 
             device = get_device()
-            model = YOLOWorld("yolov8s-world.pt")
+            try:
+                model = YOLOWorld(YOLO_WORLD_WEIGHT_NAME)
+            except Exception as exc:
+                if _is_yolo_world_setup_error(exc):
+                    raise _build_yolo_world_setup_error(exc) from exc
+                raise
             if device in ("cuda", "mps"):
                 model.half()  # FP16 半精度
                 model.to(device)
-            model.set_classes([c["prompt"] for c in classes])
+            try:
+                model.set_classes([c["prompt"] for c in classes])
+            except Exception as exc:
+                if _is_clip_setup_error(exc):
+                    raise _build_clip_setup_error(exc) from exc
+                raise
 
-            image_paths = (
-                list(Path(image_dir).glob("*.jpg")) +
-                list(Path(image_dir).glob("*.png"))
-            )
+            image_paths = list_image_files(image_dir)
+            if not image_paths:
+                raise ValueError(
+                    f"图片目录为空或未找到支持格式图片: {image_dir} "
+                    "(支持 .jpg/.jpeg/.png，大小写均可)"
+                )
+
+            effective_batch_size = 1 if device == "mps" else max(1, batch_size)
             results_map: dict = {}
 
-            for i in range(0, len(image_paths), batch_size):
+            if progress_callback:
+                progress_callback(0, len(image_paths), "detection")
+
+            for i in range(0, len(image_paths), effective_batch_size):
                 check_cancel_and_yield()
 
-                batch = [str(p) for p in image_paths[i:i + batch_size]]
+                batch = [str(p) for p in image_paths[i:i + effective_batch_size]]
                 results = model.predict(
                     batch,
                     conf=conf_threshold,
@@ -62,7 +158,7 @@ def run_detection(
 
                 if progress_callback:
                     progress_callback(
-                        min(i + batch_size, len(image_paths)),
+                        min(i + effective_batch_size, len(image_paths)),
                         len(image_paths),
                         "detection",
                     )
@@ -97,15 +193,20 @@ def run_quality_check(
             device = get_device()
             dtype = torch.float16 if device != "cpu" else torch.float32
 
-            model = AutoModelForCausalLM.from_pretrained(
-                "vikhyatk/moondream2",
-                trust_remote_code=True,
-                torch_dtype=dtype,
-            ).to(device)
-            tokenizer = AutoTokenizer.from_pretrained(
-                "vikhyatk/moondream2",
-                trust_remote_code=True,
-            )
+            try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    MOONDREAM_MODEL_ID,
+                    trust_remote_code=True,
+                    torch_dtype=dtype,
+                ).to(device)
+                tokenizer = AutoTokenizer.from_pretrained(
+                    MOONDREAM_MODEL_ID,
+                    trust_remote_code=True,
+                )
+            except Exception as exc:
+                if _is_moondream_setup_error(exc):
+                    raise _build_moondream_setup_error(exc) from exc
+                raise
 
             with open(raw_boxes_path, encoding="utf-8") as f:
                 raw_boxes: dict = json.load(f)
@@ -162,8 +263,6 @@ def run_quality_check(
 
 
 def _multi_dim_vqa(model, tokenizer, crop, prompt_text: str) -> list[float]:
-    import re
-
     questions = [
         (
             "Is this image region clear and in focus, not blurry or severely distorted? "
@@ -195,27 +294,36 @@ def _multi_dim_vqa(model, tokenizer, crop, prompt_text: str) -> list[float]:
 
 
 def _parse_confidence(answer: str) -> float:
-    import re
-
     answer_clean = answer.strip()
-    match = re.search(r"(0(?:\.\d+|\.0)|1(?:\.0)?)", answer_clean)
-    if match:
-        return float(match.group(1))
 
-    match = re.search(r"(\d{1,3})%", answer_clean)
+    # Try to find a decimal number between 0 and 1 (e.g., "0.85", "0.7", "1.0")
+    match = re.search(r"\b(0(?:\.\d+)?|1(?:\.0?)?)\b", answer_clean)
     if match:
-        return float(match.group(1)) / 100.0
+        val = float(match.group(1))
+        if 0.0 <= val <= 1.0:
+            return val
 
+    # Try percentage (e.g., "85%", "70 %")
+    match = re.search(r"(\d{1,3})\s*%", answer_clean)
+    if match:
+        return max(0.0, min(1.0, float(match.group(1)) / 100.0))
+
+    # Try to find any standalone number and interpret it
+    match = re.search(r"(\d+\.?\d*)", answer_clean)
+    if match:
+        val = float(match.group(1))
+        if 0.0 <= val <= 1.0:
+            return val
+        if 1.0 < val <= 100.0:
+            return max(0.0, min(1.0, val / 100.0))
+
+    # Keyword-based fallback
     lower = answer_clean.lower()
-    if lower.startswith("yes"):
-        num_match = re.search(r"[\d.]+", answer_clean[len("yes"):])
-        if num_match:
-            return float(num_match.group())
+    positive_keywords = ("yes", "clear", "complete", "match", "good", "high", "perfect")
+    negative_keywords = ("no", "blur", "unclear", "incomplete", "mismatch", "bad", "low", "poor")
+    if any(kw in lower for kw in positive_keywords):
         return 0.8
-    if lower.startswith("no"):
-        num_match = re.search(r"[\d.]+", answer_clean[len("no"):])
-        if num_match:
-            return float(num_match.group())
+    if any(kw in lower for kw in negative_keywords):
         return 0.1
 
     return 0.5

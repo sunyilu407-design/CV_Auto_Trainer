@@ -1,0 +1,112 @@
+{
+  "version": "v1",
+  "metadata": {
+    "summary": "基于 cargo_box 的 occupancy_monitoring 算法草案",
+    "scenario_type": "occupancy_monitoring",
+    "confidence": 0.72
+  },
+  "inputs": {
+    "runtime_modes": [
+      "offline",
+      "stream"
+    ]
+  },
+  "detectors": [
+    {
+      "detector_id": "primary_detector",
+      "detector_type": "yolo",
+      "target_classes": [
+        "cargo_box"
+      ],
+      "prompt_bindings": {
+        "cargo_box": "stacked brown cargo box"
+      }
+    }
+  ],
+  "trackers": [
+    {
+      "tracker_id": "primary_tracker",
+      "tracker_type": "bytetrack",
+      "source_detector_id": "primary_detector"
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "primary_region",
+      "name": "主监测区域",
+      "source": "user_defined",
+      "required": true
+    }
+  ],
+  "temporal_windows": [
+    {
+      "constraint_id": "primary_duration",
+      "type": "sustain",
+      "duration_seconds": 10
+    }
+  ],
+  "rules": [
+    {
+      "rule_id": "rule_1",
+      "rule_type": "region_presence_duration",
+      "event_code": "occupancy_detected",
+      "target_class": "cargo_box",
+      "region_id": "primary_region",
+      "duration_seconds": 10,
+      "duration_ms": 10000
+    }
+  ],
+  "outputs": [
+    {
+      "output_id": "primary_event_output",
+      "type": "event_stream",
+      "event_codes": [
+        "occupancy_detected"
+      ]
+    }
+  ],
+  "packaging": {
+    "format": "project_bundle",
+    "entrypoint": "run_pipeline.py",
+    "config_path": "pipeline.json"
+  },
+  "training_recommendation": {
+    "recommended_model": "yolo11s.pt",
+    "train_mode": "local",
+    "export_formats": [
+      "onnx",
+      "engine",
+      "openvino"
+    ],
+    "requires_detector_training": true,
+    "recommended_config": {
+      "model": "yolo11s.pt",
+      "train_mode": "local",
+      "export_formats": [
+        "onnx",
+        "engine",
+        "openvino"
+      ],
+      "imgsz": 640,
+      "epochs": 120,
+      "lr0": 0.01,
+      "patience": 20,
+      "conf": 0.25,
+      "iou": 0.7,
+      "gpu_type": "RTX 4090"
+    },
+    "reason_summary": "当前任务属于占位监测场景，包含 1 个目标类别，需要跟踪，同时包含区域与时序规则，因此推荐使用 yolo11s.pt、640 图像尺寸，并适度提高训练轮次。",
+    "source_map": {
+      "model": "algorithm",
+      "train_mode": "runtime",
+      "export_formats": "runtime",
+      "imgsz": "algorithm",
+      "epochs": "algorithm",
+      "lr0": "system_default",
+      "patience": "algorithm",
+      "conf": "system_default",
+      "iou": "system_default",
+      "gpu_type": "user_default"
+    }
+  }
+}

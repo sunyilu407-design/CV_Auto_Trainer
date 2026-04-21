@@ -22,6 +22,10 @@ export default function AnnotationCanvas({ imageUrl, onBoxesChange, initialBoxes
   const [startPos, setStartPos] = useState<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
+    setBoxes(initialBoxes)
+  }, [initialBoxes])
+
+  useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
@@ -47,12 +51,24 @@ export default function AnnotationCanvas({ imageUrl, onBoxesChange, initialBoxes
     ctx.drawImage(img, 0, 0)
 
     currentBoxes.forEach((box, i) => {
-      ctx.strokeStyle = i === 0 ? '#ff9800' : '#1976d2'
+      const isFirst = i === 0
+      ctx.strokeStyle = isFirst ? '#f59e0b' : 'var(--develop-blue)'
       ctx.lineWidth = 2
       ctx.strokeRect(box.x, box.y, box.width, box.height)
 
-      ctx.fillStyle = i === 0 ? 'rgba(255,152,0,0.15)' : 'rgba(25,118,210,0.15)'
+      ctx.fillStyle = isFirst ? 'rgba(245,158,11,0.12)' : 'rgba(10,114,239,0.12)'
       ctx.fillRect(box.x, box.y, box.width, box.height)
+
+      // Class number badge
+      ctx.fillStyle = isFirst ? '#f59e0b' : 'var(--develop-blue)'
+      ctx.beginPath()
+      ctx.arc(box.x + 10, box.y + 10, 8, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#fff'
+      ctx.font = 'bold 9px Inter, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(String(i + 1), box.x + 10, box.y + 10)
     })
   }, [])
 
@@ -80,14 +96,19 @@ export default function AnnotationCanvas({ imageUrl, onBoxesChange, initialBoxes
     const current = getCanvasCoords(e)
 
     redraw(ctx, boxes)
-    ctx.strokeStyle = '#ff9800'
+    ctx.strokeStyle = '#f59e0b'
     ctx.lineWidth = 2
+    ctx.setLineDash([4, 3])
     ctx.strokeRect(
       startPos.x,
       startPos.y,
       current.x - startPos.x,
       current.y - startPos.y
     )
+    ctx.setLineDash([])
+
+    ctx.fillStyle = 'rgba(245,158,11,0.12)'
+    ctx.fillRect(startPos.x, startPos.y, current.x - startPos.x, current.y - startPos.y)
   }
 
   const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -119,9 +140,10 @@ export default function AnnotationCanvas({ imageUrl, onBoxesChange, initialBoxes
         onMouseLeave={() => setDrawing(false)}
         style={{
           maxWidth: '100%',
-          border: '1px solid #ddd',
-          borderRadius: '4px',
+          borderRadius: 8,
+          border: '1px solid var(--gray-200)',
           cursor: readOnly ? 'default' : 'crosshair',
+          display: 'block',
         }}
       />
       {boxes.length > 0 && !readOnly && (
@@ -132,17 +154,29 @@ export default function AnnotationCanvas({ imageUrl, onBoxesChange, initialBoxes
           }}
           style={{
             position: 'absolute',
-            top: '8px',
-            right: '8px',
-            padding: '4px 8px',
-            fontSize: '12px',
-            background: 'rgba(0,0,0,0.6)',
+            top: 10,
+            right: 10,
+            padding: '5px 10px',
+            fontSize: 12,
+            fontWeight: 500,
+            background: 'rgba(23,23,23,0.75)',
+            backdropFilter: 'blur(8px)',
             color: '#fff',
             border: 'none',
-            borderRadius: '4px',
+            borderRadius: 6,
             cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            transition: 'background 0.15s ease',
           }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(23,23,23,0.9)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(23,23,23,0.75)' }}
         >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
           清除所有框
         </button>
       )}

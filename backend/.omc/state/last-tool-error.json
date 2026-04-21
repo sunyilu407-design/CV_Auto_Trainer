@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd backend && python3 -c \\\"\\nfrom models.database import SessionLocal\\nfrom models.db import UserSettings\\ndb = SessionLocal()\\ns = db.query(UserSettings).filter(UserSettings.id == 1).firs...",
+  "error": "Exit code 1\n(eval):cd:1: no such file or directory: backend",
+  "timestamp": "2026-04-14T08:11:33.575Z",
+  "retry_count": 1
+}

@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useSettingsStore, VlmProvider, VlmApiFormat } from '../store/settingsStore'
 import { vlmApi } from '../api/backend'
+import ModelCacheTab from './ModelCacheTab'
 
 interface Props {
   onClose: () => void
 }
 
-// Provider 默认配置（使用各厂家最新多模态模型，2026年4月）
 const PROVIDER_DEFAULTS: Record<VlmProvider, { baseUrl: string; apiFormat: VlmApiFormat; model: string }> = {
   openai: { baseUrl: 'https://api.openai.com/v1', apiFormat: 'openai', model: 'gpt-4.1' },
   kimi: { baseUrl: 'https://api.moonshot.cn/v1', apiFormat: 'openai', model: 'kimi-k2.5' },
@@ -19,8 +19,9 @@ const PROVIDER_DEFAULTS: Record<VlmProvider, { baseUrl: string; apiFormat: VlmAp
 
 export default function SettingsPanel({ onClose }: Props) {
   const { settings, setSettings, saveSettings } = useSettingsStore()
-  const [activeTab, setActiveTab] = useState<'vlm' | 'cloud' | 'general'>('vlm')
+  const [activeTab, setActiveTab] = useState<'vlm' | 'cloud' | 'general' | 'cache'>('vlm')
   const [saving, setSaving] = useState(false)
+  const [saveSuccessOpen, setSaveSuccessOpen] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
 
@@ -58,81 +59,166 @@ export default function SettingsPanel({ onClose }: Props) {
   const handleSave = async () => {
     setSaving(true)
     try {
-      await saveSettings(settings)
-      onClose()
+      const result = await saveSettings(settings)
+      if (result.success) {
+        setTestResult(null)
+        setSaveSuccessOpen(true)
+      } else {
+        setTestResult({ success: false, message: result.message })
+      }
     } finally {
       setSaving(false)
     }
   }
 
-  const showCustomFields = settings.vlmProvider === 'custom' || settings.vlmProvider === 'claude' || settings.vlmProvider === 'openai' || settings.vlmProvider === 'kimi' || settings.vlmProvider === 'minimax' || settings.vlmProvider === 'zhipu' || settings.vlmProvider === 'gemini'
+  const tabs: { key: 'vlm' | 'cloud' | 'general' | 'cache'; label: string }[] = [
+    { key: 'vlm', label: 'VLM' },
+    { key: 'cloud', label: '云端训练' },
+    { key: 'general', label: '全局' },
+    { key: 'cache', label: '模型缓存' },
+  ]
 
   return (
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0,0,0,0.5)',
+        background: 'hsla(0, 0%, 0%, 0.4)',
+        backdropFilter: 'blur(4px)',
+        WebkitBackdropFilter: 'blur(4px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 1000,
+        animation: 'fadeIn 0.15s ease-out',
       }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div
         style={{
           background: '#fff',
-          borderRadius: '8px',
-          width: '600px',
-          maxHeight: '80vh',
+          borderRadius: 12,
+          width: 560,
+          maxHeight: '85vh',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
+          position: 'relative',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05)',
+          animation: 'fadeInScale 0.2s ease-out',
         }}
       >
+        {saveSuccessOpen && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'rgba(255,255,255,0.96)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 24,
+              zIndex: 1,
+            }}
+          >
+            <div
+              style={{
+                width: '100%',
+                maxWidth: 360,
+                padding: '28px 24px',
+                borderRadius: 12,
+                border: '1px solid var(--gray-100)',
+                background: '#fff',
+                boxShadow: '0 12px 32px rgba(0,0,0,0.08)',
+                textAlign: 'center',
+              }}
+            >
+              <div
+                style={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: '50%',
+                  margin: '0 auto 16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'rgba(22,163,74,0.08)',
+                  color: '#16a34a',
+                }}
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--gray-900)' }}>设置已保存</h3>
+              <p style={{ margin: '8px 0 0', fontSize: 13, lineHeight: 1.6, color: 'var(--gray-400)' }}>
+                当前配置已经成功写入，点击确定关闭设置面板。
+              </p>
+              <div style={{ marginTop: 22, display: 'flex', justifyContent: 'center' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={onClose}
+                  style={{ minWidth: 120, padding: '8px 20px' }}
+                >
+                  确定
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Header */}
         <div
           style={{
             padding: '16px 20px',
-            borderBottom: '1px solid #e0e0e0',
+            borderBottom: '1px solid var(--gray-100)',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
           }}
         >
-          <h2 style={{ fontSize: '18px', margin: 0 }}>设置</h2>
+          <h2 style={{ fontSize: 15, fontWeight: 600, margin: 0, letterSpacing: '-0.3px' }}>设置</h2>
           <button
             onClick={onClose}
             style={{
-              background: 'none',
+              background: 'var(--gray-100)',
               border: 'none',
-              fontSize: '20px',
+              borderRadius: 6,
+              width: 28,
+              height: 28,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               cursor: 'pointer',
-              color: '#666',
+              color: 'var(--gray-600)',
+              fontSize: 16,
+              transition: 'all 0.15s ease',
             }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--gray-200)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--gray-100)' }}
           >
             ×
           </button>
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #e0e0e0' }}>
-          {([
-            { key: 'vlm', label: 'VLM' },
-            { key: 'cloud', label: '云端训练' },
-            { key: 'general', label: '全局' },
-          ] as const).map(({ key, label }) => (
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--gray-100)', padding: '0 20px' }}>
+          {tabs.map(({ key, label }) => (
             <button
               key={key}
               onClick={() => setActiveTab(key)}
               style={{
                 flex: 1,
-                padding: '10px',
+                padding: '12px 8px',
                 background: 'none',
                 border: 'none',
-                borderBottom: activeTab === key ? '2px solid #1976d2' : '2px solid transparent',
-                color: activeTab === key ? '#1976d2' : '#666',
+                borderBottom: `2px solid ${activeTab === key ? 'var(--gray-900)' : 'transparent'}`,
+                color: activeTab === key ? 'var(--gray-900)' : 'var(--gray-400)',
+                fontWeight: activeTab === key ? 600 : 400,
+                fontSize: 13,
                 cursor: 'pointer',
-                fontSize: '14px',
+                transition: 'all 0.15s ease',
+                marginBottom: -1,
               }}
             >
               {label}
@@ -141,15 +227,17 @@ export default function SettingsPanel({ onClose }: Props) {
         </div>
 
         {/* Content */}
-        <div style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
+        <div style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
+
+          {/* ── VLM Tab ── */}
           {activeTab === 'vlm' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>VLM Provider</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div className="form-group">
+                <label className="form-label">VLM Provider</label>
                 <select
+                  className="input"
                   value={settings.vlmProvider}
                   onChange={(e) => handleProviderChange(e.target.value as VlmProvider)}
-                  style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
                 >
                   <option value="openai">OpenAI (GPT-4o)</option>
                   <option value="kimi">Kimi (moonshot-v1-32k)</option>
@@ -161,91 +249,111 @@ export default function SettingsPanel({ onClose }: Props) {
                 </select>
               </div>
 
-              {showCustomFields && (
+              {(settings.vlmProvider === 'custom' || settings.vlmProvider === 'claude' || settings.vlmProvider === 'openai' || settings.vlmProvider === 'kimi' || settings.vlmProvider === 'minimax' || settings.vlmProvider === 'zhipu' || settings.vlmProvider === 'gemini') && (
                 <>
-                  <div>
-                    <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>API 格式</label>
+                  <div className="form-group">
+                    <label className="form-label">API 格式</label>
                     <select
+                      className="input"
                       value={settings.vlmApiFormat}
                       onChange={(e) => setSettings({ vlmApiFormat: e.target.value as VlmApiFormat })}
-                      style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
                     >
                       <option value="openai">OpenAI 兼容 (/v1/chat/completions)</option>
                       <option value="anthropic">Anthropic (/v1/messages)</option>
                       <option value="gemini">Google Gemini</option>
                     </select>
                   </div>
-                  <div>
-                    <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>模型名称</label>
+                  <div className="form-group">
+                    <label className="form-label">模型名称</label>
                     <input
+                      className="input"
                       value={settings.vlmModel}
                       onChange={(e) => setSettings({ vlmModel: e.target.value })}
-                      placeholder="输入模型名称，如 gpt-4o-2024-11-20"
-                      style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
+                      placeholder="如 gpt-4o-2024-11-20"
                     />
                   </div>
                 </>
               )}
 
-              <div>
-                <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>Base URL</label>
+              <div className="form-group">
+                <label className="form-label">Base URL</label>
                 <input
+                  className="input"
                   value={settings.vlmBaseUrl}
                   onChange={(e) => setSettings({ vlmBaseUrl: e.target.value })}
                   placeholder="https://api.openai.com/v1"
-                  style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>API Key</label>
-                <input
-                  type="password"
-                  value={settings.vlmApiKey}
-                  onChange={(e) => setSettings({ vlmApiKey: e.target.value })}
-                  placeholder="sk-..."
-                  style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
                 />
               </div>
 
-              {/* 测试按钮和结果 */}
-              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <div className="form-group">
+                <label className="form-label">API Key</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={settings.vlmApiKey}
+                  onChange={(e) => setSettings({ vlmApiKey: e.target.value })}
+                  placeholder="sk-..."
+                />
+              </div>
+
+              {/* Test Connection */}
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 12,
+                  alignItems: 'center',
+                  padding: '12px 14px',
+                  background: 'var(--gray-50)',
+                  borderRadius: 8,
+                  border: '1px solid var(--gray-100)',
+                }}
+              >
                 <button
+                  className="btn btn-secondary btn-sm"
                   onClick={handleTest}
                   disabled={testing || !settings.vlmApiKey}
-                  style={{
-                    padding: '8px 20px',
-                    background: testing ? '#ccc' : '#4caf50',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: testing || !settings.vlmApiKey ? 'not-allowed' : 'pointer',
-                    fontSize: '14px',
-                  }}
+                  style={{ flexShrink: 0 }}
                 >
-                  {testing ? '测试中...' : '测试连接'}
+                  {testing ? (
+                    <>
+                      <div className="spinner" />
+                      测试中...
+                    </>
+                  ) : (
+                    <>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                      测试连接
+                    </>
+                  )}
                 </button>
                 {testResult && (
-                  <span
-                    style={{
-                      color: testResult.success ? '#4caf50' : '#f44336',
-                      fontSize: '14px',
-                    }}
-                  >
-                    {testResult.message}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {testResult.success ? (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 500 }}>{testResult.message}</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ship-red)" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <span style={{ fontSize: 12, color: 'var(--ship-red)', fontWeight: 500 }}>{testResult.message}</span>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
           )}
 
+          {/* ── Cloud Tab ── */}
           {activeTab === 'cloud' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>云端提供商</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div className="form-group">
+                <label className="form-label">云端提供商</label>
                 <select
+                  className="input"
                   value={settings.cloudProvider}
                   onChange={(e) => setSettings({ cloudProvider: e.target.value as typeof settings.cloudProvider })}
-                  style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
                 >
                   <option value="generic">通用 SSH（阿里云/腾讯云/AWS/自有服务器）</option>
                   <option value="autodl">AutoDL（自动创建/销毁 GPU 实例）</option>
@@ -254,163 +362,151 @@ export default function SettingsPanel({ onClose }: Props) {
 
               {settings.cloudProvider === 'generic' ? (
                 <>
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <div style={{ flex: 2 }}>
-                      <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>SSH Host</label>
-                      <input
-                        value={settings.sshHost}
-                        onChange={(e) => setSettings({ sshHost: e.target.value })}
-                        placeholder="123.45.67.89"
-                        style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
-                      />
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <div style={{ flex: 2 }} className="form-group">
+                      <label className="form-label">SSH Host</label>
+                      <input className="input" value={settings.sshHost} onChange={(e) => setSettings({ sshHost: e.target.value })} placeholder="123.45.67.89" />
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>端口</label>
-                      <input
-                        type="number"
-                        value={settings.sshPort}
-                        onChange={(e) => setSettings({ sshPort: Number(e.target.value) })}
-                        style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
-                      />
+                    <div style={{ flex: 1 }} className="form-group">
+                      <label className="form-label">端口</label>
+                      <input type="number" className="input" value={settings.sshPort} onChange={(e) => setSettings({ sshPort: Number(e.target.value) })} />
                     </div>
                   </div>
-                  <div>
-                    <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>SSH 用户名</label>
-                    <input
-                      value={settings.sshUsername}
-                      onChange={(e) => setSettings({ sshUsername: e.target.value })}
-                      placeholder="root"
-                      style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
-                    />
+                  <div className="form-group">
+                    <label className="form-label">SSH 用户名</label>
+                    <input className="input" value={settings.sshUsername} onChange={(e) => setSettings({ sshUsername: e.target.value })} placeholder="root" />
                   </div>
-                  <div>
-                    <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>SSH 密码</label>
-                    <input
-                      type="password"
-                      value={settings.sshPassword}
-                      onChange={(e) => setSettings({ sshPassword: e.target.value })}
-                      placeholder="密码或私钥二选一"
-                      style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
-                    />
+                  <div className="form-group">
+                    <label className="form-label">SSH 密码</label>
+                    <input type="password" className="input" value={settings.sshPassword} onChange={(e) => setSettings({ sshPassword: e.target.value })} placeholder="密码或私钥二选一" />
                   </div>
-                  <div>
-                    <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>SSH 私钥路径</label>
-                    <input
-                      value={settings.sshPrivateKeyPath}
-                      onChange={(e) => setSettings({ sshPrivateKeyPath: e.target.value })}
-                      placeholder="~/.ssh/id_rsa"
-                      style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
-                    />
+                  <div className="form-group">
+                    <label className="form-label">SSH 私钥路径</label>
+                    <input className="input" value={settings.sshPrivateKeyPath} onChange={(e) => setSettings({ sshPrivateKeyPath: e.target.value })} placeholder="~/.ssh/id_rsa" />
                   </div>
-                  <div>
-                    <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>远程工作目录</label>
-                    <input
-                      value={settings.remoteWorkDir}
-                      onChange={(e) => setSettings({ remoteWorkDir: e.target.value })}
-                      placeholder="/root/workspace"
-                      style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
-                    />
+                  <div className="form-group">
+                    <label className="form-label">远程工作目录</label>
+                    <input className="input" value={settings.remoteWorkDir} onChange={(e) => setSettings({ remoteWorkDir: e.target.value })} placeholder="/root/workspace" />
                   </div>
                 </>
               ) : (
-                <div>
-                  <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>AutoDL Token</label>
+                <div className="form-group">
+                  <label className="form-label">AutoDL Token</label>
                   <input
                     type="password"
+                    className="input"
                     value={settings.autodlToken}
                     onChange={(e) => setSettings({ autodlToken: e.target.value })}
                     placeholder="AutoDL API Token"
-                    style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
                   />
-                  <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                    请在 AutoDL 控制台 → API Token 中获取
-                  </p>
+                  <p style={{ fontSize: 12, color: 'var(--gray-400)', marginTop: 4 }}>请在 AutoDL 控制台 → API Token 中获取</p>
                 </div>
               )}
             </div>
           )}
 
+          {/* ── General Tab ── */}
           {activeTab === 'general' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>默认训练模式</label>
-                <select
-                  value={settings.defaultTrainMode}
-                  onChange={(e) => setSettings({ defaultTrainMode: e.target.value as typeof settings.defaultTrainMode })}
-                  style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
-                >
-                  <option value="local">本地训练</option>
-                  <option value="cloud">云端训练</option>
-                </select>
-              </div>
-              <div>
-                <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>默认模型</label>
-                <select
-                  value={settings.defaultModel}
-                  onChange={(e) => setSettings({ defaultModel: e.target.value })}
-                  style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
-                >
-                  <option value="yolo11n.pt">YOLO11n</option>
-                  <option value="yolo11s.pt">YOLO11s（默认）</option>
-                  <option value="yolo11m.pt">YOLO11m</option>
-                  <option value="yolo11l.pt">YOLO11l</option>
-                  <option value="rtdetr-l.pt">RT-DETR-L</option>
-                </select>
-              </div>
-              <div>
-                <label style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>默认增强强度</label>
-                <select
-                  value={settings.defaultAugmentStrength}
-                  onChange={(e) => setSettings({ defaultAugmentStrength: e.target.value as typeof settings.defaultAugmentStrength })}
-                  style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
-                >
-                  <option value="light">轻度</option>
-                  <option value="medium">中度（默认）</option>
-                  <option value="heavy">重度</option>
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {[
+                { key: 'defaultTrainMode', label: '默认训练模式', options: [{ value: 'local', label: '本地训练' }, { value: 'cloud', label: '云端训练' }] },
+                { key: 'defaultModel', label: '默认模型', options: [{ value: 'yolo11n.pt', label: 'YOLO11n' }, { value: 'yolo11s.pt', label: 'YOLO11s（默认）' }, { value: 'yolo11m.pt', label: 'YOLO11m' }, { value: 'yolo11l.pt', label: 'YOLO11l' }, { value: 'rtdetr-l.pt', label: 'RT-DETR-L' }] },
+                { key: 'defaultAugmentStrength', label: '默认增强强度', options: [{ value: 'light', label: '轻度' }, { value: 'medium', label: '中度（默认）' }, { value: 'heavy', label: '重度' }] },
+              ].map(({ key, label, options }) => (
+                <div key={key} className="form-group">
+                  <label className="form-label">{label}</label>
+                  <select
+                    className="input"
+                    value={(settings as unknown as Record<string, unknown>)[key] as string}
+                    onChange={(e) => setSettings({ [key]: e.target.value } as unknown as typeof settings)}
+                  >
+                    {options.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                  </select>
+                </div>
+              ))}
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '12px 14px',
+                  background: 'var(--gray-50)',
+                  borderRadius: 8,
+                  border: '1px solid var(--gray-100)',
+                }}
+              >
+                <div>
+                  <p style={{ fontSize: 13, fontWeight: 500, margin: 0 }}>完成后默认删除原图</p>
+                  <p style={{ fontSize: 11, color: 'var(--gray-400)', margin: '2px 0 0' }}>增强完成后自动清理原始图片</p>
+                </div>
+                <label style={{ cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     checked={settings.defaultDeleteOriginal}
                     onChange={(e) => setSettings({ defaultDeleteOriginal: e.target.checked })}
+                    style={{ width: 0, height: 0, opacity: 0, position: 'absolute' }}
                   />
-                  <span style={{ fontSize: '14px' }}>完成后默认删除原图</span>
+                  <div
+                    style={{
+                      width: 36,
+                      height: 20,
+                      borderRadius: 10,
+                      background: settings.defaultDeleteOriginal ? 'var(--develop-blue)' : 'var(--gray-200)',
+                      position: 'relative',
+                      transition: 'all 0.2s ease',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: '50%',
+                        background: '#fff',
+                        position: 'absolute',
+                        top: 3,
+                        left: settings.defaultDeleteOriginal ? 19 : 3,
+                        transition: 'left 0.2s ease',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
+                      }}
+                    />
+                  </div>
                 </label>
               </div>
             </div>
           )}
         </div>
 
-        <div style={{ padding: '16px 20px', borderTop: '1px solid #e0e0e0', display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-          <button
-            onClick={onClose}
-            style={{
-              padding: '8px 20px',
-              background: '#fff',
-              border: '1px solid #ccc',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '14px',
-            }}
-          >
+          {/* ── Cache Tab ── */}
+          {activeTab === 'cache' && <ModelCacheTab />}
+
+        {/* Footer */}
+        <div
+          style={{
+            padding: '14px 20px',
+            borderTop: '1px solid var(--gray-100)',
+            display: 'flex',
+            gap: 10,
+            justifyContent: 'flex-end',
+            background: 'var(--gray-50)',
+          }}
+        >
+          <button className="btn btn-secondary" onClick={onClose} style={{ padding: '8px 16px' }}>
             取消
           </button>
           <button
+            className="btn btn-primary"
             onClick={handleSave}
             disabled={saving}
-            style={{
-              padding: '8px 20px',
-              background: saving ? '#ccc' : '#1976d2',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: saving ? 'not-allowed' : 'pointer',
-              fontSize: '14px',
-            }}
+            style={{ padding: '8px 20px' }}
           >
-            {saving ? '保存中...' : '保存设置'}
+            {saving ? (
+              <>
+                <div className="spinner" />
+                保存中...
+              </>
+            ) : '保存设置'}
           </button>
         </div>
       </div>

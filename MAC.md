@@ -138,6 +138,74 @@ npm run dev -- --host 0.0.0.0
 
 ---
 
+## macOS 单机正式部署
+
+如果你要长期稳定使用，而不是开发调试，推荐切换到“后端托管前端 dist”的正式模式。
+
+### 1. 准备 PostgreSQL
+
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+./scripts/init_postgres_macos.sh
+```
+
+### 2. 构建前端
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+### 3. 设置环境变量
+
+```bash
+export CV_AUTO_TRAINER_DB_URL=postgresql://$(whoami)@127.0.0.1:5432/cv_auto_trainer
+export CV_AUTO_TRAINER_SECRET_KEY=replace-this-with-a-stable-secret
+export CV_AUTO_TRAINER_ADMIN_USERNAME=admin
+export CV_AUTO_TRAINER_ADMIN_PASSWORD=change-me
+export CV_AUTO_TRAINER_FRONTEND_DIST="$(pwd)/dist"
+export CV_AUTO_TRAINER_CORS_ORIGINS=http://127.0.0.1:8000,http://localhost:8000
+```
+
+### 4. 启动后端与 Worker
+
+可以直接使用仓库自带脚本：
+
+```bash
+./scripts/start_backend_macos.sh
+./scripts/start_worker_macos.sh
+```
+
+### 5. 访问系统
+
+```text
+http://127.0.0.1:8000/
+```
+
+### 6. 常驻建议
+
+- 后端：用 `launchd` 托管 `scripts/start_backend_macos.sh`
+- Worker：用 `launchd` 托管 `scripts/start_worker_macos.sh`
+- 两者都只监听本机回环地址
+
+### 7. 云训练连不上时的兜底
+
+如果系统暂时不能直接连接用户的云训练环境，不建议用户先开付费实例再排查。
+
+先在本地生成手动训练包：
+
+```bash
+python scripts/prepare_manual_cloud_training.py \
+  --dataset-dir backend/uploads/<task_id>/dataset \
+  --output-dir /tmp/cv_manual_training
+```
+
+然后按 [MANUAL_CLOUD_TRAINING.md](MANUAL_CLOUD_TRAINING.md) 把 `dataset.zip` 和 `cloud_scripts/` 上传到云端手动训练。
+
+---
+
 ## 显存/内存优化建议
 
 ### 8GB 统一内存配置

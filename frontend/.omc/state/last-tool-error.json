@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd /Users/ahs/work/CV_Auto_Trainer/CV_Auto_Trainer/backend && python -m py_compile main.py routers/auth.py routers/settings.py services/settings_manager.py models/db.py 2>&1\",\"description\"...",
+  "error": "Exit code 127\n(eval):1: command not found: python",
+  "timestamp": "2026-04-14T11:00:03.751Z",
+  "retry_count": 1
+}

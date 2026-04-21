@@ -1,0 +1,19 @@
+{
+  "task_id": "54f7a980-e066-4be9-8592-d0a9aac54add",
+  "bundle_version": "v1",
+  "artifacts": {},
+  "files": [
+    "pipeline.json",
+    "manifest.json",
+    "README.md",
+    "run_pipeline.py",
+    "sample_input.json",
+    "sample_output.json",
+    "pipeline/__init__.py",
+    "pipeline/frame_adapter.py",
+    "pipeline/tracking_runtime.py",
+    "pipeline/event_engine.py",
+    "pipeline/runtime_session.py",
+    "runtime_support.py"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "task_id": "055defd4-3de1-4ffe-a7a0-c80b30c700ec",
+  "bundle_version": "v1",
+  "artifacts": {},
+  "files": [
+    "pipeline.json",
+    "manifest.json",
+    "README.md",
+    "run_pipeline.py"
+  ]
+}

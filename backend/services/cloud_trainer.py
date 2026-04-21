@@ -5,6 +5,32 @@ import zipfile
 from pathlib import Path
 
 
+def build_train_command(
+    cfg: dict,
+    data_yaml_path: str,
+    project_dir: str,
+    device: str = "0",
+) -> str:
+    """Shared training command builder used by local, generic SSH, and AutoDL trainers."""
+    model = cfg.get("model", "yolo11s.pt")
+    epochs = cfg.get("epochs", 100)
+    imgsz = cfg.get("imgsz", 640)
+    lr0 = cfg.get("lr0", 0.01)
+    patience = cfg.get("patience", 20)
+    resume_str = (
+        f", resume='{project_dir}/exp/weights/last.pt'"
+        if cfg.get("resume_last", False) else ""
+    )
+    return (
+        f"from ultralytics import YOLO; "
+        f"model = YOLO('{model}'); "
+        f"model.train(data='{data_yaml_path}', "
+        f"epochs={epochs}, imgsz={imgsz}, lr0={lr0}, "
+        f"patience={patience}, project='{project_dir}', "
+        f"name='exp', exist_ok=True, device={device}{resume_str})"
+    )
+
+
 class CloudTrainState(Enum):
     IDLE = "idle"
     CONNECTING = "connecting"

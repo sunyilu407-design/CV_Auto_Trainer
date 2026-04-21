@@ -1,27 +1,175 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+import type {
+  AlgorithmPlanDraft as ApiAlgorithmPlanDraft,
+  AlgorithmPlanEvent as ApiAlgorithmPlanEvent,
+  AlgorithmPlanRegion as ApiAlgorithmPlanRegion,
+  AlgorithmPlanTarget as ApiAlgorithmPlanTarget,
+  AlgorithmPlanTemporalConstraint as ApiAlgorithmPlanTemporalConstraint,
+  TrainingRecommendation,
+} from '../api/backend'
 
 export type Stage =
   | 'upload'
   | 'intent_confirm'
+  | 'algorithm_plan'
   | 'labeling'
   | 'augment'
   | 'review'
+  | 'offline_validation'
   | 'train_config'
   | 'training'
   | 'delivery'
+
+export type AlgorithmPlanTarget = ApiAlgorithmPlanTarget
+export type AlgorithmPlanRegion = ApiAlgorithmPlanRegion
+export type AlgorithmPlanTemporalConstraint = ApiAlgorithmPlanTemporalConstraint
+export type AlgorithmPlanEvent = ApiAlgorithmPlanEvent
+export type AlgorithmPlanDraft = ApiAlgorithmPlanDraft
+
+export interface StoredAlgorithmPlan {
+  task_id: string
+  status: string
+  algorithm_plan: AlgorithmPlanDraft
+  pipeline_config?: {
+    version: string
+    metadata: {
+      summary: string
+      scenario_type: string
+      confidence?: number | null
+    }
+    inputs: {
+      runtime_modes: string[]
+    }
+    detectors: Array<{
+      detector_id: string
+      detector_type: string
+      target_classes: string[]
+    }>
+    trackers: Array<{
+      tracker_id: string
+      tracker_type: string
+      source_detector_id: string
+    }>
+    regions: AlgorithmPlanRegion[]
+    temporal_windows: AlgorithmPlanTemporalConstraint[]
+    rules: Array<{
+      rule_id: string
+      rule_type: string
+      event_code: string
+      target_class: string
+      region_id: string
+      duration_seconds: number
+    }>
+    outputs: Array<{
+      output_id: string
+      type: string
+      event_codes: string[]
+    }>
+    packaging: {
+      format: string
+      entrypoint: string
+      config_path: string
+    }
+    training_recommendation: TrainingRecommendation
+  }
+}
+
+export type DeviceProfileId =
+  | 'embedded_low'
+  | 'embedded_high'
+  | 'laptop_cpu'
+  | 'desktop_gpu'
+  | 'apple_silicon'
+  | 'cloud_server'
+  | 'auto'
+
+export interface DeviceProfile {
+  id: DeviceProfileId
+  label: string
+  description: string
+  gpuType: string
+  platform: string
+  deviceTier: string
+}
+
+export const DEVICE_PROFILES: Record<DeviceProfileId, DeviceProfile> = {
+  auto: {
+    id: 'auto',
+    label: '让系统推荐',
+    description: '我不确定自己的设备情况，系统自动判断',
+    gpuType: '',
+    platform: '',
+    deviceTier: 'desktop_cpu',
+  },
+  embedded_low: {
+    id: 'embedded_low',
+    label: '小型嵌入式设备',
+    description: '树莓派 / Jetson Nano 等算力受限设备',
+    gpuType: 'Jetson Nano',
+    platform: 'linux',
+    deviceTier: 'edge_low',
+  },
+  embedded_high: {
+    id: 'embedded_high',
+    label: '工业级嵌入式',
+    description: 'Jetson Xavier / Orin 等中高端边缘设备',
+    gpuType: 'Jetson Orin',
+    platform: 'linux',
+    deviceTier: 'edge_high',
+  },
+  laptop_cpu: {
+    id: 'laptop_cpu',
+    label: '普通电脑 (无独立显卡)',
+    description: 'Intel / AMD CPU 的笔记本或台式机',
+    gpuType: 'CPU',
+    platform: 'linux',
+    deviceTier: 'desktop_cpu',
+  },
+  desktop_gpu: {
+    id: 'desktop_gpu',
+    label: '带显卡的电脑',
+    description: 'NVIDIA 显卡 (RTX 3060 / 4090 等)',
+    gpuType: 'RTX 4090',
+    platform: 'linux',
+    deviceTier: 'desktop_gpu',
+  },
+  apple_silicon: {
+    id: 'apple_silicon',
+    label: '苹果电脑',
+    description: 'MacBook / iMac M1/M2/M3 系列芯片',
+    gpuType: 'Apple Silicon',
+    platform: 'darwin',
+    deviceTier: 'apple_silicon',
+  },
+  cloud_server: {
+    id: 'cloud_server',
+    label: '云服务器',
+    description: '云端高端 GPU（A100 / H100 / L40）',
+    gpuType: 'A100',
+    platform: 'linux',
+    deviceTier: 'server_gpu',
+  },
+}
 
 export interface VLMClass {
   class_name: string
   prompt: string
   negative_prompt: string
   color_hint: string | null
+  display_name_zh?: string
+  display_prompt_zh?: string
+  display_negative_prompt_zh?: string
+  display_color_hint_zh?: string | null
 }
 
 export interface VLMResult {
   classes: VLMClass[]
   raw_vlm_response: string
-  confidence: number
+  confidence: number | null
 }
+
+export type VLMStatus = 'idle' | 'success' | 'failed'
 
 export interface AugmentConfig {
   targetCount: number
@@ -64,9 +212,15 @@ export interface TaskState {
 
   // 阶段一
   sampleImages: File[]
+  datasetImages: File[]
   sampleImageBoxes: Array<{ imageIndex: number; boxes: Array<{ x: number; y: number; width: number; height: number }> }>
+  algorithmRegionBoxes: Array<{ x: number; y: number; width: number; height: number }>
   userDescription: string
+  deviceProfileId: DeviceProfileId
   vlmResult: VLMResult | null
+  vlmStatus: VLMStatus
+  vlmErrorMessage: string | null
+  vlmFallbackMode: boolean
 
   // 阶段二
   labelingProgress: {
@@ -86,20 +240,34 @@ export interface TaskState {
 
   // 阶段四
   trainConfig: TrainConfig
+  trainConfigOverrides: Partial<Record<keyof TrainConfig, boolean>>
   trainingProgress: TrainingProgress | null
   artifacts: Record<string, string>
+  algorithmPlan: StoredAlgorithmPlan | null
 
   // Actions
   setStage: (stage: Stage) => void
+  setTaskMeta: (taskId: string, taskName: string) => void
   setSampleImages: (images: File[]) => void
+  setDatasetImages: (images: File[]) => void
+  setSampleImageBoxes: (
+    imageIndex: number,
+    boxes: Array<{ x: number; y: number; width: number; height: number }>
+  ) => void
+  setAlgorithmRegionBoxes: (boxes: Array<{ x: number; y: number; width: number; height: number }>) => void
   setUserDescription: (desc: string) => void
-  setVLMResult: (result: VLMResult) => void
+  setDeviceProfileId: (id: DeviceProfileId) => void
+  setVLMResult: (result: VLMResult | null) => void
+  setVLMStatus: (status: VLMStatus, message?: string | null) => void
   updateVLMClass: (index: number, updates: Partial<VLMClass>) => void
   setAugConfig: (config: Partial<AugmentConfig>) => void
   setTrainConfig: (config: Partial<TrainConfig>) => void
+  applyRecommendedTrainConfig: (config: Partial<TrainConfig>) => void
   setLabeledImageCount: (count: number) => void
   setTotalImageCount: (count: number) => void
   setTrainingProgress: (progress: TrainingProgress | null) => void
+  setAlgorithmPlan: (plan: StoredAlgorithmPlan | null) => void
+  setArtifacts: (artifacts: Record<string, string>) => void
   reset: () => void
 }
 
@@ -140,15 +308,23 @@ const defaultTrainConfig: TrainConfig = {
   gpuType: 'RTX 4090',
 }
 
-export const useTaskStore = create<TaskState>((set) => ({
+export const useTaskStore = create<TaskState>()(
+  persist(
+    (set) => ({
   taskId: null,
   taskName: '',
   stage: 'upload',
 
   sampleImages: [],
+  datasetImages: [],
   sampleImageBoxes: [],
+  algorithmRegionBoxes: [],
   userDescription: '',
+  deviceProfileId: 'auto',
   vlmResult: null,
+  vlmStatus: 'idle',
+  vlmErrorMessage: null,
+  vlmFallbackMode: false,
 
   labelingProgress: { current: 0, total: 0, phase: 'detection' },
   labeledImageCount: 0,
@@ -160,16 +336,41 @@ export const useTaskStore = create<TaskState>((set) => ({
   qualityReport: null,
 
   trainConfig: defaultTrainConfig,
+  trainConfigOverrides: {},
   trainingProgress: null,
   artifacts: {},
+  algorithmPlan: null,
 
   setStage: (stage) => set({ stage }),
 
+  setTaskMeta: (taskId, taskName) => set({ taskId, taskName }),
+
   setSampleImages: (images) => set({ sampleImages: images }),
+
+  setDatasetImages: (images) => set({ datasetImages: images }),
+
+  setSampleImageBoxes: (imageIndex, boxes) =>
+    set((state) => {
+      const rest = state.sampleImageBoxes.filter((item) => item.imageIndex !== imageIndex)
+      return {
+        sampleImageBoxes: [...rest, { imageIndex, boxes }].sort((a, b) => a.imageIndex - b.imageIndex),
+      }
+    }),
+
+  setAlgorithmRegionBoxes: (boxes) => set({ algorithmRegionBoxes: boxes }),
 
   setUserDescription: (desc) => set({ userDescription: desc }),
 
+  setDeviceProfileId: (id) => set({ deviceProfileId: id }),
+
   setVLMResult: (result) => set({ vlmResult: result }),
+
+  setVLMStatus: (status, message = null) =>
+    set({
+      vlmStatus: status,
+      vlmErrorMessage: message,
+      vlmFallbackMode: status === 'failed',
+    }),
 
   updateVLMClass: (index, updates) =>
     set((state) => {
@@ -183,7 +384,31 @@ export const useTaskStore = create<TaskState>((set) => ({
     set((state) => ({ augConfig: { ...state.augConfig, ...config } })),
 
   setTrainConfig: (config) =>
-    set((state) => ({ trainConfig: { ...state.trainConfig, ...config } })),
+    set((state) => {
+      const trainConfigOverrides = { ...state.trainConfigOverrides }
+      for (const key of Object.keys(config) as Array<keyof TrainConfig>) {
+        trainConfigOverrides[key] = true
+      }
+      return {
+        trainConfig: { ...state.trainConfig, ...config },
+        trainConfigOverrides,
+      }
+    }),
+
+  applyRecommendedTrainConfig: (config) =>
+    set((state) => {
+      const nextTrainConfig = { ...state.trainConfig }
+      for (const key of Object.keys(config) as Array<keyof TrainConfig>) {
+        if (state.trainConfigOverrides[key]) {
+          continue
+        }
+        const value = config[key]
+        if (value !== undefined) {
+          ;(nextTrainConfig as Record<keyof TrainConfig, TrainConfig[keyof TrainConfig]>)[key] = value
+        }
+      }
+      return { trainConfig: nextTrainConfig }
+    }),
 
   setLabeledImageCount: (count) => set({ labeledImageCount: count }),
 
@@ -191,15 +416,25 @@ export const useTaskStore = create<TaskState>((set) => ({
 
   setTrainingProgress: (progress) => set({ trainingProgress: progress }),
 
+  setAlgorithmPlan: (plan) => set({ algorithmPlan: plan }),
+
+  setArtifacts: (artifacts) => set({ artifacts }),
+
   reset: () =>
     set({
       taskId: null,
       taskName: '',
       stage: 'upload',
       sampleImages: [],
+      datasetImages: [],
       sampleImageBoxes: [],
+      algorithmRegionBoxes: [],
       userDescription: '',
+      deviceProfileId: 'auto',
       vlmResult: null,
+      vlmStatus: 'idle',
+      vlmErrorMessage: null,
+      vlmFallbackMode: false,
       labelingProgress: { current: 0, total: 0, phase: 'detection' },
       labeledImageCount: 0,
       augConfig: defaultAugConfig,
@@ -207,7 +442,19 @@ export const useTaskStore = create<TaskState>((set) => ({
       splitStats: { train: 0, val: 0, test: 0 },
       qualityReport: null,
       trainConfig: defaultTrainConfig,
+      trainConfigOverrides: {},
       trainingProgress: null,
       artifacts: {},
+      algorithmPlan: null,
     }),
-}))
+    }),
+    {
+      name: 'cv-auto-trainer-task',
+      partialize: (state) => {
+        // Exclude non-serializable File[] fields
+        const { sampleImages, datasetImages, ...rest } = state
+        return rest as Partial<TaskState>
+      },
+    },
+  ),
+)

@@ -1,43 +1,56 @@
-from sqlalchemy.orm import Session
-from models.db import UserSettings
-from cryptography.fernet import Fernet
 import base64
 import hashlib
+import os
+import secrets
 
-# Generate a key from a fixed seed (in production, store this securely)
-_KEY_SEED = b"cv-auto-trainer-secret-key-change-in-production"
-_KEY = base64.urlsafe_b64encode(hashlib.sha256(_KEY_SEED).digest())
-_cipher = Fernet(_KEY)
+from cryptography.fernet import Fernet
+from sqlalchemy.orm import Session
+
+from models.db import UserSettings
+
+_APP_SECRET = os.getenv("CV_AUTO_TRAINER_SECRET_KEY") or secrets.token_urlsafe(32)
+_KEY = base64.urlsafe_b64encode(hashlib.sha256(_APP_SECRET.encode("utf-8")).digest())
+_CIPHER = Fernet(_KEY)
 
 
 def encrypt_value(value: str) -> str:
     if not value:
         return ""
-    return _cipher.encrypt(value.encode()).decode()
+    return _CIPHER.encrypt(value.encode("utf-8")).decode("utf-8")
 
 
 def decrypt_value(encrypted: str) -> str:
     if not encrypted:
         return ""
-    return _cipher.decrypt(encrypted.encode()).decode()
+    return _CIPHER.decrypt(encrypted.encode("utf-8")).decode("utf-8")
 
 
-def get_settings(db: Session) -> UserSettings:
-    settings = db.query(UserSettings).filter(UserSettings.id == 1).first()
-    if not settings:
-        settings = UserSettings(id=1)
-        db.add(settings)
+def get_settings(db: Session, user_id: int) -> UserSettings:
+    settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+    if settings:
+        return settings
+
+    orphan_settings = db.query(UserSettings).filter(UserSettings.user_id.is_(None)).order_by(UserSettings.id.asc()).first()
+    if orphan_settings:
+        orphan_settings.user_id = user_id
         db.commit()
-        db.refresh(settings)
+        db.refresh(orphan_settings)
+        return orphan_settings
+
+    settings = UserSettings(user_id=user_id)
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
     return settings
 
 
 class SettingsManager:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user_id: int):
         self.db = db
+        self.user_id = user_id
 
     def get_settings(self) -> UserSettings:
-        return get_settings(self.db)
+        return get_settings(self.db, self.user_id)
 
     def update_settings(self, **kwargs):
         settings = self.get_settings()

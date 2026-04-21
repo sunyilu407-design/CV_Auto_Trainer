@@ -31,12 +31,12 @@ export default function MetricsChart({ currentEpoch, currentMap }: Props) {
 
     const w = canvas.offsetWidth
     const h = canvas.offsetHeight
-    const padding = 30
+    const padding = 36
 
     ctx.clearRect(0, 0, w, h)
 
-    // Grid
-    ctx.strokeStyle = '#f0f0f0'
+    // Grid lines
+    ctx.strokeStyle = 'var(--gray-100)'
     ctx.lineWidth = 1
     for (let i = 0; i <= 4; i++) {
       const y = padding + ((h - padding * 2) * i) / 4
@@ -44,9 +44,15 @@ export default function MetricsChart({ currentEpoch, currentMap }: Props) {
       ctx.moveTo(padding, y)
       ctx.lineTo(w - padding, y)
       ctx.stroke()
-      ctx.fillStyle = '#999'
-      ctx.font = '10px sans-serif'
-      ctx.fillText(`${((4 - i) / 4 * 100).toFixed(0)}%`, 5, y + 3)
+    }
+
+    // Y-axis labels
+    ctx.fillStyle = 'var(--gray-400)'
+    ctx.font = '11px Inter, sans-serif'
+    ctx.textAlign = 'left'
+    for (let i = 0; i <= 4; i++) {
+      const y = padding + ((h - padding * 2) * i) / 4
+      ctx.fillText(`${((4 - i) / 4 * 100).toFixed(0)}%`, 4, y + 4)
     }
 
     if (data.length < 2) return
@@ -54,9 +60,33 @@ export default function MetricsChart({ currentEpoch, currentMap }: Props) {
     const maxEpoch = Math.max(...data.map((d) => d.epoch), 1)
     const xScale = (w - padding * 2) / maxEpoch
 
+    // Gradient fill under line
+    const gradient = ctx.createLinearGradient(0, padding, 0, h - padding)
+    gradient.addColorStop(0, 'rgba(10, 114, 239, 0.15)')
+    gradient.addColorStop(1, 'rgba(10, 114, 239, 0)')
+
+    ctx.beginPath()
+    data.forEach((d, i) => {
+      const x = padding + d.epoch * xScale
+      const y = padding + (h - padding * 2) * (1 - d.map)
+      if (i === 0) {
+        ctx.moveTo(x, y)
+      } else {
+        ctx.lineTo(x, y)
+      }
+    })
+    const lastX = padding + data[data.length - 1].epoch * xScale
+    ctx.lineTo(lastX, h - padding)
+    ctx.lineTo(padding, h - padding)
+    ctx.closePath()
+    ctx.fillStyle = gradient
+    ctx.fill()
+
     // Draw line
-    ctx.strokeStyle = '#1976d2'
+    ctx.strokeStyle = 'var(--develop-blue)'
     ctx.lineWidth = 2
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
     ctx.beginPath()
     data.forEach((d, i) => {
       const x = padding + d.epoch * xScale
@@ -66,25 +96,42 @@ export default function MetricsChart({ currentEpoch, currentMap }: Props) {
     })
     ctx.stroke()
 
+    // Latest point dot
+    const latest = data[data.length - 1]
+    const lx = padding + latest.epoch * xScale
+    const ly = padding + (h - padding * 2) * (1 - latest.map)
+    ctx.beginPath()
+    ctx.arc(lx, ly, 3, 0, Math.PI * 2)
+    ctx.fillStyle = 'var(--develop-blue)'
+    ctx.fill()
+    ctx.strokeStyle = '#fff'
+    ctx.lineWidth = 1.5
+    ctx.stroke()
+
     // X axis label
-    ctx.fillStyle = '#999'
-    ctx.font = '10px sans-serif'
-    ctx.fillText('Epoch', w / 2 - 15, h - 5)
+    ctx.fillStyle = 'var(--gray-400)'
+    ctx.font = '11px Inter, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('Epoch', w / 2, h - 6)
   }, [currentEpoch, currentMap])
 
   return (
     <div
-      style={{
-        background: '#fff',
-        borderRadius: '8px',
-        padding: '16px',
-        height: '200px',
-      }}
+      className="card-section"
+      style={{ padding: '16px 20px' }}
     >
-      <h3 style={{ fontSize: '14px', marginBottom: '12px' }}>mAP50 曲线</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0, letterSpacing: '-0.2px' }}>mAP50 曲线</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--develop-blue)' }} />
+          <span style={{ fontSize: 12, color: 'var(--gray-400)', fontVariantNumeric: 'tabular-nums' }}>
+            {currentMap > 0 ? `${(currentMap * 100).toFixed(1)}%` : '—'}
+          </span>
+        </div>
+      </div>
       <canvas
         ref={canvasRef}
-        style={{ width: '100%', height: 'calc(100% - 30px)' }}
+        style={{ width: '100%', height: '160px' }}
       />
     </div>
   )

@@ -9,6 +9,7 @@ TASK_SCHEMA = {
     "type": "object",
     "required": ["classes"],
     "properties": {
+        "confidence": {"type": "number"},
         "classes": {
             "type": "array",
             "minItems": 1,
@@ -20,6 +21,10 @@ TASK_SCHEMA = {
                     "prompt": {"type": "string"},
                     "negative_prompt": {"type": "string"},
                     "color_hint": {"type": ["string", "null"]},
+                    "display_name_zh": {"type": "string"},
+                    "display_prompt_zh": {"type": "string"},
+                    "display_negative_prompt_zh": {"type": "string"},
+                    "display_color_hint_zh": {"type": ["string", "null"]},
                 },
             },
         }
@@ -29,16 +34,34 @@ TASK_SCHEMA = {
 SYSTEM_PROMPT_TEMPLATE = """
 你是一个计算机视觉标注任务专家。用户会提供若干参考图片（已画框）和口语化描述。
 {box_context}
-你需要输出一个标准 JSON，描述每个需要检测的类别。
+你必须同时参考用户的文字描述和参考图片，不允许只看图片忽略文字描述。
+其中，用户的文字描述是高优先级约束；图片和参考框用于补充外观、颜色、视角、遮挡、尺度等视觉细节。
+你需要输出一个标准 JSON，描述每个需要检测的类别，并给出整体解析置信度。
+
+要求：
+1. `class_name` 仍然使用英文小写下划线，作为内部标识。
+2. `prompt` 必须是更详细的英文视觉描述，长度优先充分，不要过短，需覆盖形状、材质、典型外观、场景、姿态、颜色、排除项等关键信息。
+3. `negative_prompt` 用英文写清楚容易混淆但不应算作该类的情况。
+4. `color_hint` 可用简短中文或英文。
+5. `display_name_zh` 必须是给前端页面展示用的简洁中文类别名。
+6. `display_prompt_zh` 必须是给前端展示的中文详细描述，要和英文 `prompt` 语义一致。
+7. `display_negative_prompt_zh` 必须是给前端展示的中文排除项描述。
+8. `display_color_hint_zh` 必须是给前端展示的中文颜色提示，可为 null。
+9. `confidence` 为 0 到 1 之间的小数，表示你对整体类别解析结果的把握程度。
 
 输出格式（仅输出 JSON，不要有任何额外文字）：
 {{
+  "confidence": 0.82,
   "classes": [
     {{
       "class_name": "英文类别名（小写下划线）",
       "prompt": "详细的英文视觉描述，用于引导目标检测模型定位目标",
       "negative_prompt": "该类别不包含的特征描述",
-      "color_hint": "主要颜色特征（可为null）"
+      "color_hint": "主要颜色特征（可为null）",
+      "display_name_zh": "给页面展示的中文类别名",
+      "display_prompt_zh": "给页面展示的中文详细描述",
+      "display_negative_prompt_zh": "给页面展示的中文排除项描述",
+      "display_color_hint_zh": "给页面展示的中文颜色提示（可为null）"
     }}
   ]
 }}
@@ -279,23 +302,30 @@ class GeminiBackend(VLMBackend):
         self.api_key = api_key
         self.model = model
 
-    def call_api(self, messages: list, max_tokens: int = 1024) -> str:
-        # Gemini: 提取 user 消息内容
-        user_content = ""
+    def call_api(self, messages: list, max_tokens: int = 1024, **kwargs) -> str:
+        # Gemini: extract system instruction and user content (with images)
+        system_text = ""
+        user_parts = []
         for msg in messages:
-            if msg["role"] == "user":
-                user_content = msg["content"]
-                break
+            if msg["role"] == "system":
+                system_text = msg["content"] if isinstance(msg["content"], str) else str(msg["content"])
+            elif msg["role"] == "user":
+                content = msg["content"]
+                if isinstance(content, list):
+                    user_parts = content
+                elif isinstance(content, str):
+                    user_parts = [{"text": content}]
 
-        payload = {
-            "contents": [{
-                "parts": [{"text": user_content}]
-            }],
+        payload: dict = {
+            "contents": [{"parts": user_parts}],
             "generationConfig": {"maxOutputTokens": max_tokens},
         }
+        if system_text:
+            payload["system_instruction"] = {"parts": [{"text": system_text}]}
+
         resp = httpx.post(
             f"{self.base_url}/models/{self.model}:generateContent",
-            headers={"Authorization": f"Bearer {self.api_key}"},
+            params={"key": self.api_key},
             json=payload,
             timeout=60,
         )
@@ -311,7 +341,7 @@ class GeminiBackend(VLMBackend):
             }
             resp = httpx.post(
                 f"{self.base_url}/models/{self.model}:generateContent",
-                headers={"Authorization": f"Bearer {self.api_key}"},
+                params={"key": self.api_key},
                 json=payload,
                 timeout=30,
             )
@@ -390,15 +420,46 @@ class VLMAdapter:
         max_retry: int = 3,
     ) -> dict:
         last_err = None
-        for attempt in range(max_retry):
+        last_raw = ""
+        for _attempt in range(max_retry):
             try:
                 raw = self._call_api(images_base64, user_text, sample_boxes)
+                last_raw = raw
                 result = self._parse_and_validate(raw)
+                result["status"] = "success"
+                result["message"] = ""
+                result["retryable"] = False
+                result["raw_vlm_response"] = raw
                 return result
             except (json.JSONDecodeError, ValidationError, ValueError, httpx.HTTPError) as e:
                 last_err = e
                 continue
-        raise RuntimeError(f"VLM 解析失败，已重试 {max_retry} 次: {last_err}")
+        return self._build_failed_result(last_err, last_raw)
+
+    def _build_failed_result(self, error: Optional[Exception], raw: str) -> dict:
+        message = "VLM 服务暂时无法完成视觉理解，当前将先根据文字需求生成草案"
+        retryable = True
+
+        if isinstance(error, json.JSONDecodeError):
+            if not raw.strip():
+                message = "VLM 返回了空内容，当前将先根据文字需求生成草案"
+            else:
+                message = "VLM 已响应，但返回格式不符合系统要求，当前将先根据文字需求生成草案"
+        elif isinstance(error, ValidationError):
+            message = "VLM 已响应，但返回字段不符合系统要求，当前将先根据文字需求生成草案"
+        elif isinstance(error, ValueError):
+            message = "VLM 返回内容无法解析，当前将先根据文字需求生成草案"
+        elif isinstance(error, httpx.HTTPError):
+            message = "VLM 服务暂时不可用，当前将先根据文字需求生成草案"
+
+        return {
+            "status": "failed",
+            "message": message,
+            "retryable": retryable,
+            "raw_vlm_response": raw,
+            "classes": [],
+            "confidence": None,
+        }
 
     def _build_system_prompt(self, sample_boxes: Optional[list] = None) -> str:
         if sample_boxes:
@@ -428,7 +489,52 @@ class VLMAdapter:
         json_str = match.group(1).strip() if match else raw.strip()
         data = json.loads(json_str)
         validate(instance=data, schema=TASK_SCHEMA)
+        confidence = data.get("confidence")
+        if not isinstance(confidence, (int, float)):
+            data["confidence"] = None
+        else:
+            data["confidence"] = max(0.0, min(1.0, float(confidence)))
+
+        for item in data.get("classes", []):
+            item["display_name_zh"] = item.get("display_name_zh") or item.get("class_name") or ""
+            item["display_prompt_zh"] = item.get("display_prompt_zh") or item.get("prompt") or ""
+            item["display_negative_prompt_zh"] = item.get("display_negative_prompt_zh") or item.get("negative_prompt") or ""
+            item["display_color_hint_zh"] = item.get("display_color_hint_zh") or item.get("color_hint")
         return data
+
+    def call_with_system_prompt(
+        self,
+        system_prompt: str,
+        user_text: str,
+        images_base64: Optional[list[str]] = None,
+        response_format: Optional[str] = None,
+        max_tokens: int = 4096,
+        max_retry: int = 3,
+    ) -> str:
+        """
+        通用方法：使用自定义 system prompt 调用 VLM。
+        用于算法规划、视频验证等需要自定义 prompt 的场景。
+        """
+        user_content = self.backend.build_content(images_base64 or [], user_text)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+        last_err = None
+        for _attempt in range(max_retry):
+            try:
+                raw = self.backend.call_api(
+                    messages,
+                    max_tokens=max_tokens,
+                    temperature=self.temperature,
+                    top_p=self.top_p,
+                    stop=self.stop,
+                )
+                return raw
+            except Exception as e:
+                last_err = e
+                continue
+        raise RuntimeError(f"VLM call failed after {max_retry} retries: {last_err}")
 
     def test_connection(self) -> dict:
         """测试 API 连接"""
