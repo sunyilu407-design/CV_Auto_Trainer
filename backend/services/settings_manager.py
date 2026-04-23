@@ -1,14 +1,13 @@
 import base64
 import hashlib
 import os
-import secrets
 
 from cryptography.fernet import Fernet
 from sqlalchemy.orm import Session
 
 from models.db import UserSettings
 
-_APP_SECRET = os.getenv("CV_AUTO_TRAINER_SECRET_KEY") or secrets.token_urlsafe(32)
+_APP_SECRET = os.getenv("CV_AUTO_TRAINER_SECRET_KEY") or "cv-auto-trainer-dev-secret-key-v1-change-in-prod"
 _KEY = base64.urlsafe_b64encode(hashlib.sha256(_APP_SECRET.encode("utf-8")).digest())
 _CIPHER = Fernet(_KEY)
 

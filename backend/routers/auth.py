@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 _TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
 _PBKDF2_ITERATIONS = 600_000
-_APP_SECRET = os.getenv("CV_AUTO_TRAINER_SECRET_KEY") or secrets.token_urlsafe(32)
+_APP_SECRET = os.getenv("CV_AUTO_TRAINER_SECRET_KEY") or "cv-auto-trainer-dev-secret-key-v1-change-in-prod"
 
 
 def _app_secret_bytes() -> bytes:
@@ -189,9 +189,7 @@ def me(current_user: dict = Depends(require_auth)):
 
 def seed_admin_user(db: Session):
     username = os.getenv("CV_AUTO_TRAINER_ADMIN_USERNAME", "admin")
-    password = os.getenv("CV_AUTO_TRAINER_ADMIN_PASSWORD")
-    if not password:
-        return
+    password = os.getenv("CV_AUTO_TRAINER_ADMIN_PASSWORD", "admin123")
 
     admin = db.query(User).filter(User.username == username).first()
     if not admin:
