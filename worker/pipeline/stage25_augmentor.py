@@ -97,9 +97,9 @@ def augment_dataset(
     # 复制原始数据
     for img_path in src_images:
         label_path = Path(src_label_dir) / f"{img_path.stem}.txt"
-        shutil.copy(img_path, output_image_dir)
+        shutil.copy(img_path, output_image_dir / img_path.name)
         if label_path.exists():
-            shutil.copy(label_path, output_label_dir)
+            shutil.copy(label_path, output_label_dir / label_path.name)
 
     existing = len(src_images)
     needed = max(0, target_count - existing)
@@ -122,15 +122,17 @@ def augment_dataset(
                 break
             try:
                 result = pipeline(image=img, bboxes=bboxes, labels=labels)
-                if not result["bboxes"]:
+                result_bboxes = result.get("bboxes")
+                if not result_bboxes:
                     continue
 
+                result_labels = result.get("labels", [])
                 out_stem = f"{img_path.stem}_aug{generated:05d}"
                 cv2.imwrite(f"{output_image_dir}/{out_stem}.jpg", result["image"])
                 _save_yolo_label(
                     f"{output_label_dir}/{out_stem}.txt",
-                    result["bboxes"],
-                    result["labels"],
+                    result_bboxes,
+                    result_labels,
                 )
                 generated += 1
 

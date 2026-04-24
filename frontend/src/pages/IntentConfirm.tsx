@@ -1,4 +1,5 @@
 import { useTaskStore } from '../store/taskStore'
+import PreAnnotatedToggle from '../components/PreAnnotatedToggle'
 
 function detectScenarioLabel(userDescription: string): string {
   if (/[仓位占位占用空位]/.test(userDescription)) return '占位监测'
@@ -164,6 +165,49 @@ export default function IntentConfirm() {
           )}
         </div>
 
+        {/* VLM 视觉推理洞察 — 展示 AI 的分析思路 */}
+        {hasVisualCandidates && vlmResult?.scenario_hint && (
+          <div style={{ marginTop: 16, padding: '14px 16px', borderRadius: 8, background: 'linear-gradient(135deg, #f8faff 0%, #f0f7ff 100%)', border: '1px solid rgba(59,130,246,0.15)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 16v-4"/>
+                <path d="M12 8h.01"/>
+              </svg>
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#3b82f6' }}>VLM 视觉推理分析</span>
+              <span style={{ fontSize: 11, color: 'var(--gray-400)', marginLeft: 'auto' }}>仅供确认参考</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'rgba(139,92,246,0.1)', color: '#7c3aed', border: '1px solid rgba(139,92,246,0.2)' }}>
+                场景: {vlmResult.scenario_hint}
+              </span>
+              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'rgba(245,158,11,0.1)', color: '#b45309', border: '1px solid rgba(245,158,11,0.2)' }}>
+                难度: {vlmResult.difficulty_hint ?? 'moderate'}
+              </span>
+            </div>
+            {vlmResult.visual_insights && vlmResult.visual_insights.length > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--gray-600)', lineHeight: 1.7 }}>
+                <div style={{ fontWeight: 500, color: 'var(--gray-700)', marginBottom: 4 }}>观察到的视觉特征：</div>
+                <ul style={{ margin: 0, paddingLeft: 16 }}>
+                  {vlmResult.visual_insights.map((insight, i) => (
+                    <li key={i}>{insight}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {vlmResult.special_considerations && vlmResult.special_considerations.length > 0 && (
+              <div style={{ fontSize: 12, color: '#b45309', lineHeight: 1.7, marginTop: 6 }}>
+                <div style={{ fontWeight: 500, marginBottom: 4 }}>特别注意事项：</div>
+                <ul style={{ margin: 0, paddingLeft: 16 }}>
+                  {vlmResult.special_considerations.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
           <div style={{ padding: '14px 16px', borderRadius: 8, background: 'var(--gray-50)', boxShadow: 'var(--shadow-ring)' }}>
             <div style={{ fontSize: 12, color: 'var(--gray-500)', marginBottom: 8 }}>监测对象</div>
@@ -204,6 +248,9 @@ export default function IntentConfirm() {
           当前页面编辑的是业务侧定义，用来帮助后续生成能力与策略草案。这里的中文说明不会覆盖底层保存的视觉提示词。
         </p>
       </div>
+
+      {/* 跳过打标选项 — 适用于用户已有预标注数据 */}
+      <PreAnnotatedToggle />
 
       {hasVisualCandidates ? (
         <div className="card-section" style={{ marginBottom: 32 }}>
@@ -276,6 +323,39 @@ export default function IntentConfirm() {
                       />
                     </div>
                   </div>
+
+                  {/* VLM 推理出的视觉特征 — 展示 AI 从图片中推断出的信息 */}
+                  {classItem.estimated_size_hint && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '10px 12px', background: 'rgba(0,0,0,0.02)', borderRadius: 6 }}>
+                      <div style={{ fontSize: 11, color: 'var(--gray-400)', width: '100%', marginBottom: 4 }}>AI 从样板图推断的视觉特征（仅供参考）</div>
+                      {classItem.estimated_size_hint && (
+                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'rgba(34,197,94,0.08)', color: '#15803d', border: '1px solid rgba(34,197,94,0.15)' }}>
+                          目标尺寸: {classItem.estimated_size_hint}
+                        </span>
+                      )}
+                      {classItem.typical_perspective && (
+                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'rgba(59,130,246,0.08)', color: '#1d4ed8', border: '1px solid rgba(59,130,246,0.15)' }}>
+                          视角: {classItem.typical_perspective}
+                        </span>
+                      )}
+                      {classItem.occlusion_tolerance && (
+                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'rgba(245,158,11,0.08)', color: '#b45309', border: '1px solid rgba(245,158,11,0.15)' }}>
+                          遮挡容忍: {classItem.occlusion_tolerance}
+                        </span>
+                      )}
+                      {classItem.rotation_invariant !== undefined && (
+                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'rgba(139,92,246,0.08)', color: '#7c3aed', border: '1px solid rgba(139,92,246,0.15)' }}>
+                          旋转不变: {String(classItem.rotation_invariant)}
+                        </span>
+                      )}
+                      {classItem.data_augmentation_priority && classItem.data_augmentation_priority.length > 0 && (
+                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'rgba(236,72,153,0.08)', color: '#be185d', border: '1px solid rgba(236,72,153,0.15)' }}>
+                          增强策略: {classItem.data_augmentation_priority.join(', ')}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   <div style={{ fontSize: 11, color: 'var(--gray-400)' }}>原始候选标识：{classItem.class_name}</div>
                 </div>
               </div>

@@ -95,7 +95,7 @@ async def upload_video(
     video_info = get_video_info(str(video_path))
 
     if purpose == "vlm_analysis":
-        frames_b64 = extract_frames_for_vlm(str(video_path), max_frames=8)
+        frames_b64, frame_meta = extract_frames_for_vlm(str(video_path), max_frames=8)
         return {
             "code": 0, "msg": "ok",
             "data": {
@@ -103,6 +103,7 @@ async def upload_video(
                 "video_info": video_info,
                 "frames_base64": frames_b64,
                 "frame_count": len(frames_b64),
+                "frame_meta": frame_meta,
             },
         }
 
@@ -126,6 +127,96 @@ async def upload_video(
             "video_info": video_info,
             "frame_count": result["frame_count"],
             "frames_dir": str(frames_dir),
+        },
+    }
+
+
+@router.get("/{task_id}/check-annotations")
+def check_existing_annotations(
+    task_id: str,
+    subdir: str = "images",
+    current_user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """
+    检查任务目录下是否存在预标注的 YOLO .txt 文件，
+    用于判断用户是否已经使用 LabelImg/roLabelImg 等工具预先标注好了数据。
+    返回找到的标注文件数量和覆盖的图片数。
+    """
+    task = get_task_for_user(db, task_id, current_user)
+
+    img_dir = UPLOAD_DIR / task_id / subdir
+    if not img_dir.exists():
+        return {
+            "code": 0, "msg": "ok",
+            "data": {
+                "has_annotations": False,
+                "total_images": 0,
+                "annotated_images": 0,
+                "total_boxes": 0,
+                "detected_classes": [],
+                "message": "目录不存在或为空",
+            },
+        }
+
+    from pathlib import Path
+
+    exts = {".jpg", ".jpeg", ".png"}
+    image_paths = sorted(
+        [p for p in img_dir.iterdir() if p.is_file() and p.suffix.lower() in exts],
+        key=lambda p: p.name.lower(),
+    )
+
+    if not image_paths:
+        return {
+            "code": 0, "msg": "ok",
+            "data": {
+                "has_annotations": False,
+                "total_images": len(image_paths),
+                "annotated_images": 0,
+                "total_boxes": 0,
+                "detected_classes": [],
+                "message": "目录中无图片文件",
+            },
+        }
+
+    annotated_images = 0
+    total_boxes = 0
+    class_sets: set[int] = set()
+
+    for img_path in image_paths:
+        label_path = img_dir / f"{img_path.stem}.txt"
+        if not label_path.exists():
+            continue
+        annotated_images += 1
+        try:
+            with open(label_path, encoding="utf-8") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) >= 5:
+                        total_boxes += 1
+                        try:
+                            class_sets.add(int(parts[0]))
+                        except ValueError:
+                            pass
+        except Exception:
+            pass
+
+    detected_classes = sorted(class_sets)
+
+    return {
+        "code": 0, "msg": "ok",
+        "data": {
+            "has_annotations": annotated_images > 0,
+            "total_images": len(image_paths),
+            "annotated_images": annotated_images,
+            "total_boxes": total_boxes,
+            "detected_classes": detected_classes,
+            "message": (
+                f"发现 {annotated_images}/{len(image_paths)} 张图片已标注，共 {total_boxes} 个框，类别索引 {detected_classes}"
+                if annotated_images > 0
+                else "未发现 YOLO 标注文件"
+            ),
         },
     }
 

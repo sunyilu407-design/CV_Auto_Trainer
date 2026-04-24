@@ -52,6 +52,10 @@ def _ensure_task_columns():
         "training_progress": "ALTER TABLE tasks ADD COLUMN training_progress JSON",
         "training_started_at": "ALTER TABLE tasks ADD COLUMN training_started_at DATETIME",
         "training_finished_at": "ALTER TABLE tasks ADD COLUMN training_finished_at DATETIME",
+        "split_stats": "ALTER TABLE tasks ADD COLUMN split_stats JSON",
+        "quality_report": "ALTER TABLE tasks ADD COLUMN quality_report JSON",
+        "artifact_paths": "ALTER TABLE tasks ADD COLUMN artifact_paths JSON",
+        "error_message": "ALTER TABLE tasks ADD COLUMN error_message TEXT",
     }
     _ensure_table_columns("tasks", required_columns)
 

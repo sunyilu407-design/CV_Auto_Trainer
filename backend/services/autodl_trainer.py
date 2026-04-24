@@ -19,12 +19,26 @@ class AutoDLTrainingError(RuntimeError):
 
 class AutoDLCloudTrainer(CloudTrainer):
     """
-    AutoDL 专用云端训练器。
-    用户只需提供 token，系统自动通过 AutoDL API 创建和销毁 GPU 实例。
+    AutoDL 专用云端训练器（原型实现）。
+
+    ⚠️  当前状态：原型 / 手动模式
+    AutoDL 官方不提供公开 REST API。当前实现仅记录训练参数和路径，
+    实际训练需要用户手动通过 SSH 接入 AutoDL 实例执行。
+
+    使用方式：
+    1. 在 AutoDL 控制台手动开启 GPU 实例
+    2. 获取 SSH 信息
+    3. 在"云端训练"页面选择"SSH 手动模式"，填入 SSH 信息
+    4. 系统会准备好训练包（dataset.zip + cloud_scripts/），按提示上传即可
+
+    如需自动化 AutoDL，请参考：
+    https://www.autodl.com/docs/
     """
 
+    _PROTOTYPE_WARNING = True
+
     def __init__(self, config: dict):
-        self.token = config["autodl_token"]
+        self.token = config.get("autodl_token", "")
         self.api_base = "https://www.autodl.com/api/v1"
         self.gpu_type = config.get("gpu_type", "RTX 4090")
         self.remote_work_dir = "/root"
@@ -37,6 +51,7 @@ class AutoDLCloudTrainer(CloudTrainer):
 
     def connect(self):
         self.state = CloudTrainState.CONNECTING
+        # AutoDL 需要先手动创建实例，无法自动化
         self._instance_id = self._create_instance()
         self._wait_for_running()
         self._ssh = self._get_ssh()
@@ -50,14 +65,21 @@ class AutoDLCloudTrainer(CloudTrainer):
         return out, err
 
     def _create_instance(self) -> str:
-        resp = httpx.post(
-            f"{self.api_base}/instance/create",
-            headers={"Authorization": f"Bearer {self.token}"},
-            json={"gpu_type": self.gpu_type, "image": "pytorch:2.1.0-cuda11.8"},
-            timeout=60,
+        # ⚠️ AutoDL 官方不提供公开 REST API，无法自动创建实例
+        # 请在 AutoDL 控制台手动开启实例后，使用 GenericSSH trainer（SSH 手动模式）
+        raise AutoDLTrainingError(
+            message=(
+                "AutoDL 原型实现不支持自动创建实例。"
+                "请在 AutoDL 控制台 (https://www.autodl.com/console/instance) "
+                "手动开启 GPU 实例，然后使用「SSH 手动模式」接入。"
+            ),
+            recovery_info={
+                "autodl_guide_url": "https://www.autodl.com/docs/",
+                "console_url": "https://www.autodl.com/console/instance",
+                "manual_mode_required": True,
+                "hint": "选择 GenericSSH trainer（SSH 手动模式），填入 AutoDL 实例的 SSH 信息即可",
+            },
         )
-        resp.raise_for_status()
-        return resp.json()["data"]["instance_id"]
 
     def _wait_for_running(self, timeout: int = 300):
         deadline = time.time() + timeout

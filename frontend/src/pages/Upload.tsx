@@ -28,6 +28,7 @@ export default function Upload() {
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoInfo, setVideoInfo] = useState<{ fps: number; duration_seconds: number; width: number; height: number; frame_count?: number } | null>(null)
   const [videoUploading, setVideoUploading] = useState(false)
+  const [annotationFiles, setAnnotationFiles] = useState<File[]>([])
   const sampleFileInputRef = useRef<HTMLInputElement>(null)
   const datasetFileInputRef = useRef<HTMLInputElement>(null)
   const videoFileInputRef = useRef<HTMLInputElement>(null)
@@ -42,9 +43,31 @@ export default function Upload() {
 
   const handleDatasetFilesSelected = useCallback((files: FileList | null) => {
     if (!files) return
-    const existing = new Set(datasetImages.map((file) => `${file.name}-${file.size}-${file.lastModified}`))
-    const additions = Array.from(files).filter((file) => !existing.has(`${file.name}-${file.size}-${file.lastModified}`))
-    setDatasetImages([...datasetImages, ...additions])
+    const allFiles = Array.from(files)
+    const imageExts = new Set(['jpg', 'jpeg', 'png'])
+    const txtFiles: File[] = []
+    const imageFiles: File[] = []
+
+    for (const file of allFiles) {
+      const ext = file.name.split('.').pop()?.toLowerCase()
+      if (ext === 'txt') {
+        txtFiles.push(file)
+      } else if (ext && imageExts.has(ext)) {
+        imageFiles.push(file)
+      }
+    }
+
+    const existingImageNames = new Set(datasetImages.map((f) => `${f.name}-${f.size}`))
+    const newImages = imageFiles.filter((f) => !existingImageNames.has(`${f.name}-${f.size}`))
+
+    setDatasetImages([...datasetImages, ...newImages])
+    if (txtFiles.length > 0) {
+      setAnnotationFiles((prev) => {
+        const existing = new Set(prev.map((f) => `${f.name}-${f.size}`))
+        const unique = txtFiles.filter((f) => !existing.has(`${f.name}-${f.size}`))
+        return [...prev, ...unique]
+      })
+    }
   }, [datasetImages, setDatasetImages])
 
   const handleVideoSelected = useCallback(async (files: FileList | null) => {
@@ -85,6 +108,13 @@ export default function Upload() {
       await filesApi.upload(currentTaskId, formData, 'images')
     }
 
+    // 上传预标注的 YOLO .txt 文件
+    for (const file of annotationFiles) {
+      const formData = new FormData()
+      formData.append('file', file)
+      await filesApi.upload(currentTaskId, formData, 'images')
+    }
+
     return currentTaskId
   }
 
@@ -117,7 +147,10 @@ export default function Upload() {
       const rawResponse = typeof result.raw_vlm_response === 'string' ? result.raw_vlm_response : ''
       const confidence = typeof result.confidence === 'number' ? result.confidence : null
       const classes = (result.classes as Array<Record<string, unknown>>).map((item) => ({
-        ...item,
+        class_name: String(item.class_name ?? ''),
+        prompt: String(item.prompt ?? ''),
+        negative_prompt: String(item.negative_prompt ?? ''),
+        color_hint: (item.color_hint as string | null | undefined) ?? null,
         display_name_zh: String(item.display_name_zh ?? item.class_name ?? ''),
         display_prompt_zh: String(item.display_prompt_zh ?? item.prompt ?? ''),
         display_negative_prompt_zh: String(item.display_negative_prompt_zh ?? item.negative_prompt ?? ''),
@@ -132,10 +165,10 @@ export default function Upload() {
 
       if (result.status === 'success') {
         setVLMResult({
-          classes: classes as never[],
+          classes,
           raw_vlm_response: rawResponse,
           confidence,
-        } as never)
+        })
         setVLMStatus('success', null)
       } else {
         setVLMResult(null)
@@ -322,7 +355,7 @@ export default function Upload() {
               <input
                 ref={datasetFileInputRef}
                 type="file"
-                accept="image/jpeg,image/png"
+                accept="image/jpeg,image/png,text/plain,.txt"
                 multiple
                 onChange={(e) => handleDatasetFilesSelected(e.target.files)}
                 style={{ display: 'none' }}

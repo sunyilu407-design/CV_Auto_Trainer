@@ -46,12 +46,33 @@ class TrainDispatcher:
             return self._run_cloud(task, train_config, progress_callback)
 
     def _run_local(self, task: Task, train_config: dict, progress_callback: Optional[Callable]):
-        """本地训练：通过 HTTP 请求 Worker 接口"""
-        # Worker 本地训练通过 WebSocket 已在前端启动
-        # 这里只更新数据库状态
+        """
+        本地训练：前端已通过 WebSocket 启动 Worker。
+        本方法轮询数据库等待 Worker 回调（training_complete / training_error），
+        收到后写入 artifact_paths 并注册模型缓存。
+        """
         task.status = "training_local"
         self.db.commit()
-        return {"status": "local_training_started"}
+
+        poll_interval = 3  # 每 3 秒轮询一次
+        max_wait = 1800    # 最多等待 30 分钟
+        waited = 0
+
+        while waited < max_wait:
+            time.sleep(poll_interval)
+            waited += poll_interval
+            self.db.refresh(task)
+            if task.training_state in ("done", "error", "cancelled"):
+                break
+
+        if task.training_state == "done" and task.artifact_paths:
+            self._register_trained_model_cache(task, train_config, task.artifact_paths)
+            return dict(task.artifact_paths)
+
+        if task.training_state == "error":
+            raise RuntimeError(f"本地训练失败: {task.error_message}")
+
+        raise RuntimeError("本地训练超时（30 分钟内未收到完成通知）")
 
     def _run_cloud(self, task: Task, train_config: dict, progress_callback: Optional[Callable]):
         """云端训练"""

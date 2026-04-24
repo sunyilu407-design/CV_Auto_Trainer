@@ -23,13 +23,15 @@ interface MultiModelArtifact {
 }
 
 export default function TrainingMonitor() {
-  const { taskId, trainingProgress, trainConfig, setStage, setTrainingProgress, setArtifacts } = useTaskStore()
+  const { taskId, trainingProgress, trainConfig, setStage, setTrainingProgress, setArtifacts, artifacts, previewResults, setPreviewResults } = useTaskStore()
   const { settings } = useSettingsStore()
   const [autoDLRecovery, setAutoDLRecovery] = useState<AutoDLRecoveryInfo | null>(null)
   const [recoverySteps, setRecoverySteps] = useState<AutoDLRecoveryStep[]>([])
   const [loadingRecovery, setLoadingRecovery] = useState(false)
   const [multiModelProgress, setMultiModelProgress] = useState<MultiModelProgress | null>(null)
   const [multiModelArtifacts, setMultiModelArtifacts] = useState<Record<string, MultiModelArtifact> | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
 
   useEffect(() => {
     if (trainConfig.trainMode === 'cloud' && taskId) {
@@ -63,7 +65,7 @@ export default function TrainingMonitor() {
           }
           if (status.state === 'done') {
             clearInterval(poll)
-            setStage('delivery')
+            setStage('video_inference')
           }
         } catch {
           // ignore
@@ -81,6 +83,43 @@ export default function TrainingMonitor() {
       .catch(() => setRecoverySteps([]))
       .finally(() => setLoadingRecovery(false))
   }, [autoDLRecovery, taskId, recoverySteps.length, loadingRecovery])
+
+  // 训练完成后自动触发预览推理
+  useEffect(() => {
+    if (!trainingProgress || trainingProgress.state !== 'done') return
+    if (previewLoading || previewResults.length > 0) return
+    if (!artifacts || !taskId) return
+
+    const bestWeight = artifacts["best.pt"] || artifacts["bestMap"] || artifacts["best_weight"]
+    if (!bestWeight) return
+
+    setPreviewLoading(true)
+    setPreviewError(null)
+    trainingApi.previewInference({
+      task_id: taskId,
+      weights_path: bestWeight,
+      sample_images_dir: `../backend/uploads/${taskId}/labeled_images`,
+      conf: trainConfig.conf,
+      iou: trainConfig.iou,
+      max_images: 8,
+    }).then((result) => {
+      const raw = result as unknown as { results: Array<Record<string, unknown>> }
+      const mapped = raw.results.map((r) => ({
+        imageName: r.image_name as string,
+        imageBase64: r.image_base64 as string | undefined,
+        detections: (r.detections as Array<Record<string, unknown>>).map((d) => ({
+          className: d.class_name as string,
+          confidence: d.confidence as number,
+          bbox: d.bbox_xywhn as [number, number, number, number],
+        })),
+      }))
+      setPreviewResults(mapped)
+    }).catch((e) => {
+      setPreviewError(`预览推理失败: ${e instanceof Error ? e.message : String(e)}`)
+    }).finally(() => {
+      setPreviewLoading(false)
+    })
+  }, [trainingProgress?.state, artifacts, taskId, trainConfig.conf, trainConfig.iou])
 
   const handleCancel = async () => {
     if (trainConfig.trainMode === 'local') {
@@ -266,6 +305,86 @@ export default function TrainingMonitor() {
 
       {/* Metrics Chart */}
       <MetricsChart currentEpoch={trainingProgress?.currentEpoch ?? 0} currentMap={trainingProgress?.currentMap ?? 0} />
+
+      {/* Preview Inference Results */}
+      {(previewLoading || previewResults.length > 0 || previewError) && (
+        <div className="card-section" style={{ marginTop: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <div>
+              <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>效果预览</h3>
+              <p style={{ fontSize: 12, color: 'var(--gray-400)' }}>用训练好的模型在样板上推理，直观判断识别效果</p>
+            </div>
+            {previewLoading && <div className="spinner" />}
+          </div>
+
+          {previewError && (
+            <div style={{ padding: '12px 16px', background: 'rgba(255,91,79,0.06)', border: '1px solid rgba(255,91,79,0.2)', borderRadius: 8, fontSize: 13, color: 'var(--ship-red)', marginBottom: 16 }}>
+              {previewError}
+            </div>
+          )}
+
+          {previewResults.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+              {previewResults.map((result) => (
+                <div key={result.imageName} style={{ border: '1px solid var(--gray-100)', borderRadius: 10, overflow: 'hidden' }}>
+                  <img
+                    src={`data:image/jpeg;base64,${result.imageBase64}`}
+                    alt={result.imageName}
+                    style={{ width: '100%', height: 200, objectFit: 'cover', display: 'block' }}
+                  />
+                  <div style={{ padding: '10px 12px' }}>
+                    <div style={{ fontSize: 11, color: 'var(--gray-500)', marginBottom: 6, fontWeight: 500 }}>
+                      {result.imageName}
+                    </div>
+                    {result.detections.length > 0 ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {result.detections.map((det, i) => (
+                          <div key={i} style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            padding: '3px 8px', borderRadius: 4,
+                            background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)',
+                            fontSize: 11, color: '#15803d',
+                          }}>
+                            <span style={{ fontWeight: 600 }}>{det.className}</span>
+                            <span style={{ opacity: 0.7 }}>{(det.confidence * 100).toFixed(0)}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: 'var(--ship-red)', fontStyle: 'italic' }}>未检出目标</div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!previewLoading && previewResults.length === 0 && !previewError && (
+            <div style={{ fontSize: 13, color: 'var(--gray-400)', textAlign: 'center', padding: '20px 0' }}>
+              训练完成，正在生成预览...
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Delivery Button */}
+      {trainingProgress?.state === 'done' && (
+        <div style={{ marginTop: 24, display: 'flex', gap: 12 }}>
+          <button
+            className="btn btn-primary"
+            onClick={() => setStage('video_inference')}
+            style={{ padding: '12px 28px', fontSize: 15, fontWeight: 600 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="23 7 16 12 23 5 21 2 16 12 21 22 23 17 16 22 8 13 16 8 3 17 8 12 3 17 8 12"/></svg>
+            视频推理演示
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={() => setStage('delivery')}
+            style={{ padding: '12px 24px', fontSize: 14 }}>
+            交付物导出
+          </button>
+        </div>
+      )}
 
       {isCloudTraining && !autoDLRecovery && (
         <div

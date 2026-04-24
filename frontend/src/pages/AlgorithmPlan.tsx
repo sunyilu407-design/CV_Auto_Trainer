@@ -24,6 +24,7 @@ const ROLE_LABELS: Record<string, string> = {
   feature_matcher: '特征匹配器',
   tracker: '目标跟踪器',
   rule_engine: '规则引擎',
+  ocr: '文字识别',
 }
 
 const DIFFICULTY_LABELS: Record<string, string> = {
@@ -400,8 +401,16 @@ export default function AlgorithmPlan() {
                 </p>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {modelPipeline.map((step, idx) => (
-                  <div key={step.step_id} style={{ padding: '16px 18px', borderRadius: 8, background: step.reuse_cache_id ? 'rgba(22,163,74,0.04)' : 'var(--gray-50)', boxShadow: 'var(--shadow-ring)', border: step.reuse_cache_id ? '1px solid rgba(22,163,74,0.2)' : 'none' }}>
+                {modelPipeline.map((step, idx) => {
+                  const isOcr = step.role === 'ocr'
+                  return (
+                  <div key={step.step_id} style={{
+                    padding: '16px 18px',
+                    borderRadius: 8,
+                    background: isOcr ? 'rgba(139,92,246,0.04)' : step.reuse_cache_id ? 'rgba(22,163,74,0.04)' : 'var(--gray-50)',
+                    boxShadow: 'var(--shadow-ring)',
+                    border: isOcr ? '1px solid rgba(139,92,246,0.2)' : step.reuse_cache_id ? '1px solid rgba(22,163,74,0.2)' : 'none',
+                  }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
                       <div className="flex items-center gap-2">
                         <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gray-400)', width: 20 }}>#{idx + 1}</span>
@@ -409,7 +418,11 @@ export default function AlgorithmPlan() {
                       </div>
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <span className="badge badge-blue">{ROLE_LABELS[step.role] ?? step.role}</span>
-                        {step.requires_training ? (
+                        {isOcr ? (
+                          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: 'rgba(139,92,246,0.1)', color: '#7c3aed' }}>
+                            内置引擎
+                          </span>
+                        ) : step.requires_training ? (
                           <span className="badge badge-pink">需要训练</span>
                         ) : step.reuse_cache_id ? (
                           <span className="badge badge-green">复用已有模型</span>
@@ -426,13 +439,18 @@ export default function AlgorithmPlan() {
                         {step.reuse_info_zh}
                       </div>
                     )}
+                    {isOcr && (
+                      <div style={{ fontSize: 11, color: '#7c3aed', marginTop: 6 }}>
+                        文字识别引擎，首次运行自动下载模型文件，无需训练
+                      </div>
+                    )}
                     {step.alternative_model_ids && step.alternative_model_ids.length > 0 && (
                       <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 6 }}>
                         备选模型：{step.alternative_model_ids.join(', ')}
                       </div>
                     )}
                   </div>
-                ))}
+                )})}
               </div>
 
               {trainingStrategy?.train_mode_reason_zh && (

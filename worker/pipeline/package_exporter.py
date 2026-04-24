@@ -203,6 +203,9 @@ def _process_multi_model_artifacts(
                         step_id_to_step[step_id]["bundle_weight_path"] = rel
                 except OSError:
                     continue
+        elif record.get("source") == "builtin":
+            # OCR 等内置模型无需权重文件，只记录元数据
+            pass
 
         model_manifest.append(entry)
 
@@ -218,8 +221,10 @@ def _copy_runtime_modules(output_dir: Path) -> List[str]:
     bundle_pipeline_dir.mkdir(parents=True, exist_ok=True)
 
     copied_files = []
-    for name in ["__init__.py", "frame_adapter.py", "tracking_runtime.py", "event_engine.py", "runtime_session.py"]:
+    for name in ["__init__.py", "frame_adapter.py", "tracking_runtime.py", "event_engine.py", "runtime_session.py", "ocr_runtime.py"]:
         source_path = source_dir / name
+        if not source_path.exists():
+            continue
         target_path = bundle_pipeline_dir / name
         shutil.copyfile(source_path, target_path)
         copied_files.append(f"pipeline/{name}")
@@ -255,6 +260,26 @@ def _build_readme(
         "- `run_pipeline.py`：本地运行入口脚本",
         "- `pipeline/`：随包导出的最小 runtime 实现",
     ]
+
+    # 检查是否有 OCR 步骤
+    has_ocr = False
+    if artifacts:
+        multi = artifacts.get("__multi_model__") or {}
+        for record in multi.values():
+            if record.get("role") == "ocr" or record.get("source") == "builtin":
+                has_ocr = True
+                break
+
+    if has_ocr:
+        lines.append("- `pipeline/ocr_runtime.py`：文字识别运行时（EasyOCR，零训练开销）")
+        lines.append("")
+        lines.append("## OCR 依赖说明")
+        lines.append("")
+        lines.append("本算法方案包含文字识别（OCR）步骤，首次运行时会自动下载 EasyOCR 模型文件。")
+        lines.append("如需预装，可执行：")
+        lines.append("```bash")
+        lines.append("python -c \"from pipeline.ocr_runtime import _get_reader; _get_reader(['ch_sim', 'en'])\"")
+        lines.append("```")
 
     if model_manifest:
         lines.append("- `models/`：各阶段训练/复用的权重文件（按 step_id 分子目录）")

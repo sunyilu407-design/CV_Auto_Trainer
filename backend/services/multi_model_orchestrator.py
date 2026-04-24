@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 TRAINABLE_ROLES = {"primary_detector", "secondary_detector", "classifier"}
+OCR_ROLES = {"ocr"}
+NON_TRAINABLE_ROLES = {"tracker", "rule_engine"} | OCR_ROLES
 
 
 class LocalMultiModelNotSupported(RuntimeError):
@@ -103,9 +105,16 @@ class MultiModelTrainingOrchestrator:
         }
         """
         steps = self.plan_training_steps(task)
-        if not steps:
+        # 收集 OCR 步骤（无需训练，直接记录到 artifacts）
+        ocr_artifacts = self._collect_ocr_steps(task)
+
+        if not steps and not ocr_artifacts:
             logger.info("No trainable steps in model_pipeline, skip orchestration")
             return {"multi_model_artifacts": {}, "primary_artifacts": {}}
+
+        multi_artifacts: Dict[str, Dict[str, Any]] = {}
+        # OCR 步骤直接写入 artifacts（无需训练）
+        multi_artifacts.update(ocr_artifacts)
 
         mode_str = base_train_config.get("train_mode", "cloud")
         if mode_str == "local" and len(steps) > 1:
@@ -265,6 +274,22 @@ class MultiModelTrainingOrchestrator:
             "source": source,
             "done": False,
         })
+
+    def _collect_ocr_steps(self, task: Task) -> Dict[str, Dict[str, Any]]:
+        """收集 pipeline 中所有 OCR 步骤，记录为无需训练的模型"""
+        plan = task.algorithm_plan or {}
+        pipeline = plan.get("model_pipeline") or []
+        ocr_artifacts: Dict[str, Dict[str, Any]] = {}
+        for step in pipeline:
+            if step.get("role") in OCR_ROLES:
+                ocr_artifacts[step["step_id"]] = {
+                    "source": "builtin",
+                    "model_id": "easyocr",
+                    "role": "ocr",
+                    "step_id": step.get("step_id", "ocr_0"),
+                    "languages": step.get("languages", ["ch_sim", "en"]),
+                }
+        return ocr_artifacts
 
     def _is_cache_suitable(self, cache: TrainedModelCache, step: Dict[str, Any]) -> bool:
         """判断缓存模型是否适合该步骤：角色/基础模型兼容"""

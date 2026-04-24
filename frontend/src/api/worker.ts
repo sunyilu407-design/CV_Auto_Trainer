@@ -143,6 +143,7 @@ class WorkerClient {
     iou_threshold?: number
     batch_size?: number
     qa_threshold?: number
+    use_existing_labels?: boolean
   }) {
     this.send({ type: 'start_detection', payload })
   }

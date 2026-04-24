@@ -19,6 +19,7 @@ export type Stage =
   | 'offline_validation'
   | 'train_config'
   | 'training'
+  | 'video_inference'
   | 'delivery'
 
 export type AlgorithmPlanTarget = ApiAlgorithmPlanTarget
@@ -161,12 +162,24 @@ export interface VLMClass {
   display_prompt_zh?: string
   display_negative_prompt_zh?: string
   display_color_hint_zh?: string | null
+  // VLM 推理出的视觉特征
+  estimated_size_hint?: string
+  typical_perspective?: string
+  rotation_invariant?: boolean
+  occlusion_tolerance?: string
+  color_consistency?: string
+  data_augmentation_priority?: string[]
 }
 
 export interface VLMResult {
   classes: VLMClass[]
   raw_vlm_response: string
   confidence: number | null
+  // VLM 全局推理结果
+  scenario_hint?: string
+  difficulty_hint?: string
+  visual_insights?: string[]
+  special_considerations?: string[]
 }
 
 export type VLMStatus = 'idle' | 'success' | 'failed'
@@ -195,6 +208,21 @@ export interface TrainConfig {
   exportFormats: ('onnx' | 'engine' | 'coreml' | 'openvino')[]
   trainMode: 'local' | 'cloud'
   gpuType: string
+  // 快速预览模式：少量数据、短 epoch，快速验证效果
+  previewMode: boolean
+  previewMaxImages: number
+  previewMaxEpochs: number
+  previewImgsz: number
+}
+
+export interface PreviewResult {
+  imageName: string
+  detections: Array<{
+    className: string
+    confidence: number
+    bbox: [number, number, number, number]
+  }>
+  imageBase64?: string
 }
 
 export interface TrainingProgress {
@@ -223,6 +251,7 @@ export interface TaskState {
   vlmFallbackMode: boolean
 
   // 阶段二
+  skipLabeling: boolean
   labelingProgress: {
     current: number
     total: number
@@ -244,8 +273,12 @@ export interface TaskState {
   trainingProgress: TrainingProgress | null
   artifacts: Record<string, string>
   algorithmPlan: StoredAlgorithmPlan | null
+  previewResults: PreviewResult[]
 
   // Actions
+  setSplitStats: (stats: { train: number; val: number; test: number }) => void
+  setQualityReport: (report: DataQualityReport | null) => void
+  setPreviewResults: (results: PreviewResult[]) => void
   setStage: (stage: Stage) => void
   setTaskMeta: (taskId: string, taskName: string) => void
   setSampleImages: (images: File[]) => void
@@ -260,6 +293,7 @@ export interface TaskState {
   setVLMResult: (result: VLMResult | null) => void
   setVLMStatus: (status: VLMStatus, message?: string | null) => void
   updateVLMClass: (index: number, updates: Partial<VLMClass>) => void
+  setSkipLabeling: (skip: boolean) => void
   setAugConfig: (config: Partial<AugmentConfig>) => void
   setTrainConfig: (config: Partial<TrainConfig>) => void
   applyRecommendedTrainConfig: (config: Partial<TrainConfig>) => void
@@ -306,6 +340,10 @@ const defaultTrainConfig: TrainConfig = {
   exportFormats: ['onnx'],
   trainMode: 'local',
   gpuType: 'RTX 4090',
+  previewMode: false,
+  previewMaxImages: 20,
+  previewMaxEpochs: 30,
+  previewImgsz: 416,
 }
 
 export const useTaskStore = create<TaskState>()(
@@ -326,6 +364,8 @@ export const useTaskStore = create<TaskState>()(
   vlmErrorMessage: null,
   vlmFallbackMode: false,
 
+  skipLabeling: false,
+
   labelingProgress: { current: 0, total: 0, phase: 'detection' },
   labeledImageCount: 0,
 
@@ -340,6 +380,7 @@ export const useTaskStore = create<TaskState>()(
   trainingProgress: null,
   artifacts: {},
   algorithmPlan: null,
+  previewResults: [],
 
   setStage: (stage) => set({ stage }),
 
@@ -372,6 +413,8 @@ export const useTaskStore = create<TaskState>()(
       vlmFallbackMode: status === 'failed',
     }),
 
+  setSkipLabeling: (skip: boolean) => set({ skipLabeling: skip }),
+
   updateVLMClass: (index, updates) =>
     set((state) => {
       if (!state.vlmResult) return state
@@ -402,6 +445,10 @@ export const useTaskStore = create<TaskState>()(
         if (state.trainConfigOverrides[key]) {
           continue
         }
+        // 跳过预览模式相关字段（前端独立控制）
+        if (key === 'previewMode' || key === 'previewMaxImages' || key === 'previewMaxEpochs' || key === 'previewImgsz') {
+          continue
+        }
         const value = config[key]
         if (value !== undefined) {
           ;(nextTrainConfig as Record<keyof TrainConfig, TrainConfig[keyof TrainConfig]>)[key] = value
@@ -413,6 +460,12 @@ export const useTaskStore = create<TaskState>()(
   setLabeledImageCount: (count) => set({ labeledImageCount: count }),
 
   setTotalImageCount: (count) => set({ totalImageCount: count }),
+
+  setSplitStats: (stats) => set({ splitStats: stats }),
+
+  setQualityReport: (report) => set({ qualityReport: report }),
+
+  setPreviewResults: (results) => set({ previewResults: results }),
 
   setTrainingProgress: (progress) => set({ trainingProgress: progress }),
 
@@ -435,6 +488,7 @@ export const useTaskStore = create<TaskState>()(
       vlmStatus: 'idle',
       vlmErrorMessage: null,
       vlmFallbackMode: false,
+      skipLabeling: false,
       labelingProgress: { current: 0, total: 0, phase: 'detection' },
       labeledImageCount: 0,
       augConfig: defaultAugConfig,
@@ -446,6 +500,7 @@ export const useTaskStore = create<TaskState>()(
       trainingProgress: null,
       artifacts: {},
       algorithmPlan: null,
+      previewResults: [],
     }),
     }),
     {

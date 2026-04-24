@@ -10,6 +10,7 @@ import OfflineValidation from './pages/OfflineValidation'
 import TrainConfig from './pages/TrainConfig'
 import TrainingMonitor from './pages/TrainingMonitor'
 import Delivery from './pages/Delivery'
+import VideoInferenceDemo from './pages/VideoInferenceDemo'
 import SettingsPanel from './components/SettingsPanel'
 import Login from './pages/Login'
 import { useTaskStore, Stage } from './store/taskStore'
@@ -26,6 +27,7 @@ const WORKFLOW_STAGES: { key: Stage; label: string; accent: string }[] = [
   { key: 'offline_validation', label: '离线验证', accent: '#de1d8d' },
   { key: 'train_config', label: '训练配置', accent: '#de1d8d' },
   { key: 'training', label: '训练执行', accent: '#de1d8d' },
+  { key: 'video_inference', label: '效果演示', accent: '#ff5b4f' },
   { key: 'delivery', label: '算法交付', accent: '#ff5b4f' },
 ]
 
@@ -249,6 +251,7 @@ function App() {
             {stage === 'offline_validation' && <OfflineValidation />}
             {stage === 'train_config' && <TrainConfig />}
             {stage === 'training' && <TrainingMonitor />}
+            {stage === 'video_inference' && <VideoInferenceDemo />}
             {stage === 'delivery' && <Delivery />}
           </div>
         </div>

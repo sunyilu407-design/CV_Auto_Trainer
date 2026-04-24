@@ -50,7 +50,7 @@ function SourceBadge({ label, variant }: { label: string; variant: keyof typeof 
 }
 
 export default function TrainConfig() {
-  const { taskId, trainConfig, trainConfigOverrides, setTrainConfig, applyRecommendedTrainConfig, setStage, setTrainingProgress, setStage: setAppStage, algorithmPlan } = useTaskStore()
+  const { taskId, trainConfig, trainConfigOverrides, setTrainConfig, applyRecommendedTrainConfig, setStage, setTrainingProgress, setArtifacts, setStage: setAppStage, algorithmPlan } = useTaskStore()
   const { settings } = useSettingsStore()
   const trainingRecommendation = algorithmPlan?.pipeline_config?.training_recommendation
   const recommendationSummary = trainingRecommendation?.reason_summary
@@ -134,11 +134,19 @@ export default function TrainConfig() {
       alert('缺少任务 ID，请重新从上传阶段开始')
       return
     }
+
+    // 预览模式：用少量数据快速验证效果
+    const effectiveConfig = trainConfig.previewMode ? {
+      ...trainConfig,
+      epochs: trainConfig.previewMaxEpochs,
+      imgsz: trainConfig.previewImgsz,
+    } : trainConfig
+
     setStage('training')
     setTrainingProgress({
       state: 'starting',
       currentEpoch: 0,
-      totalEpochs: trainConfig.epochs,
+      totalEpochs: effectiveConfig.epochs,
       currentMap: 0,
       startedAt: new Date().toISOString(),
     })
@@ -150,21 +158,35 @@ export default function TrainConfig() {
           setTrainingProgress({
             state: 'training',
             currentEpoch: msg.currentEpoch as number,
-            totalEpochs: msg.totalEpochs as number,
+            totalEpochs: effectiveConfig.epochs,
             currentMap: msg.currentMap as number,
             startedAt: new Date().toISOString(),
           })
         }
         if (msg.type === 'training_complete') {
-          setAppStage('delivery')
+          const artifacts = (msg as unknown as { artifacts: Record<string, string> }).artifacts
+          setArtifacts(artifacts ?? {})
+          // 立即标记完成状态，触发预览推理 effect
+          setTrainingProgress({
+            state: 'done',
+            currentEpoch: effectiveConfig.epochs,
+            totalEpochs: effectiveConfig.epochs,
+            currentMap: 0,
+            startedAt: new Date().toISOString(),
+          })
+          // 非预览模式直接跳转
+          if (!trainConfig.previewMode) {
+            setAppStage('delivery')
+          }
         }
         if (msg.type === 'training_error') {
-          alert(`训练出错: ${msg.message}`)
+          alert(`训练出错: ${String((msg as unknown as { message: string }).message ?? '未知错误')}`)
+          setAppStage('train_config')
         }
       })
       workerClient.startLocalTraining({
         dataset_dir: `../backend/uploads/${taskId}/dataset`,
-        train_config: trainConfig as unknown as Record<string, unknown>,
+        train_config: effectiveConfig as unknown as Record<string, unknown>,
       })
     } else {
       try {
@@ -428,6 +450,88 @@ export default function TrainConfig() {
           </div>
         </div>
       )}
+
+      {/* Quick Preview Mode */}
+      <div className="card-section" style={{ marginBottom: 16, background: trainConfig.previewMode ? 'rgba(16,185,129,0.04)' : undefined, border: trainConfig.previewMode ? '1px solid rgba(16,185,129,0.2)' : undefined }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+              <span className="badge" style={{ background: trainConfig.previewMode ? 'var(--success-green)' : 'var(--gray-200)', color: trainConfig.previewMode ? '#fff' : 'var(--gray-500)', fontSize: 11, fontWeight: 600 }}>Preview Mode</span>
+              <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>快速预览训练效果</h3>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--gray-500)', margin: 0, lineHeight: 1.6 }}>
+              用少量数据（{trainConfig.previewMaxImages} 张）+ 短 epoch（{trainConfig.previewMaxEpochs}）+ 小分辨率（{trainConfig.previewImgsz}）快速验证效果，
+              通常 1~5 分钟即可看到结果。训练完成后自动在样板上推理，直观判断识别是否正确。
+            </p>
+          </div>
+          <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer', flexShrink: 0 }}>
+            <input
+              type="checkbox"
+              checked={trainConfig.previewMode}
+              onChange={(e) => setTrainConfig({ previewMode: e.target.checked })}
+              style={{ width: 0, height: 0, opacity: 0 }}
+            />
+            <div
+              style={{
+                width: 44, height: 24,
+                borderRadius: 12,
+                background: trainConfig.previewMode ? 'var(--success-green)' : 'var(--gray-200)',
+                position: 'relative',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <div
+                style={{
+                  width: 18, height: 18, borderRadius: '50%',
+                  background: '#fff',
+                  position: 'absolute',
+                  top: 3,
+                  left: trainConfig.previewMode ? 23 : 3,
+                  transition: 'left 0.2s ease',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+                }}
+              />
+            </div>
+          </label>
+        </div>
+
+        {trainConfig.previewMode && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--gray-100)' }}>
+            <div className="form-group">
+              <label className="form-label">最多图片数</label>
+              <input
+                type="number"
+                className="input"
+                min={5}
+                max={100}
+                value={trainConfig.previewMaxImages}
+                onChange={(e) => setTrainConfig({ previewMaxImages: Number(e.target.value) })}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Epoch 数</label>
+              <input
+                type="number"
+                className="input"
+                min={5}
+                max={100}
+                value={trainConfig.previewMaxEpochs}
+                onChange={(e) => setTrainConfig({ previewMaxEpochs: Number(e.target.value) })}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">图像分辨率</label>
+              <select
+                className="input"
+                value={trainConfig.previewImgsz}
+                onChange={(e) => setTrainConfig({ previewImgsz: Number(e.target.value) })}
+              >
+                {[320, 416, 512, 640].map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Cost Estimate */}
       {trainConfig.trainMode === 'cloud' && estimate && (

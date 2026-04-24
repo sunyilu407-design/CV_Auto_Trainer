@@ -49,11 +49,18 @@ class LocalTrainer:
 
         returncode = self._process.wait()
 
+        artifacts = self._collect_artifacts()
+
+        # 从 results.csv 读取最终 best mAP，写入 artifacts
+        best_map = self._read_final_map()
+        if best_map is not None:
+            artifacts["best_map"] = best_map
+
         if returncode != 0 and not self._stop_flag:
             stderr = self._process.stderr.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"本地训练子进程异常退出（code {returncode}）: {stderr}")
 
-        return self._collect_artifacts()
+        return artifacts
 
     def _build_command(self, cfg: dict, data_yaml: Path) -> list[str]:
         model = cfg.get("model", "yolov8s.pt")
@@ -63,7 +70,7 @@ class LocalTrainer:
         patience = cfg.get("patience", 20)
         project = str(Path(self._output_dir).parent)
         resume_str = (
-            f", resume='{self._output_dir / 'weights' / 'last.pt'}'"
+            ", resume='" + str(self._output_dir / 'weights' / 'last.pt') + "'"
             if cfg.get("resume_last", False) else ""
         )
 
@@ -129,6 +136,32 @@ class LocalTrainer:
         if results_csv.exists():
             artifacts["results.csv"] = str(results_csv)
         return artifacts
+
+    def _read_final_map(self) -> float | None:
+        """
+        从 results.csv 最后一行读取 best mAP50 值。
+        Ultralytics results.csv 列顺序：epoch, train/box_loss, train/cls_loss, ...
+        val/mAP50(B) 在第 4 列（index 3）
+        """
+        results_csv = self._output_dir / "results.csv"
+        if not results_csv.exists():
+            return None
+        try:
+            with open(results_csv, encoding="utf-8") as f:
+                lines = f.readlines()
+            for line in reversed(lines):
+                stripped = line.strip()
+                if not stripped or stripped.startswith("epoch"):
+                    continue
+                parts = stripped.split(",")
+                if len(parts) >= 4:
+                    try:
+                        return float(parts[3].strip())
+                    except ValueError:
+                        continue
+        except OSError:
+            pass
+        return None
 
     def cancel(self):
         self._stop_flag = True

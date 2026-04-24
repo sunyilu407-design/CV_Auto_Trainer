@@ -1,5 +1,8 @@
+import logging
 import httpx
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class AlertManager:
@@ -46,8 +49,8 @@ class AlertManager:
                 },
             }
             httpx.post(self.dingtalk_webhook, json=payload, timeout=10)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("[AlertManager] 钉钉通知发送失败: webhook=%s error=%s", self.dingtalk_webhook[:20] + "...", e)
 
     def _send_feishu(self, title: str, detail: str):
         try:
@@ -56,8 +59,8 @@ class AlertManager:
                 "content": {"text": f"{title}\n\n{detail}"},
             }
             httpx.post(self.feishu_webhook, json=payload, timeout=10)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("[AlertManager] 飞书通知发送失败: webhook=%s error=%s", self.feishu_webhook[:20] + "...", e)
 
     def _send_email(self, title: str, detail: str):
         import smtplib
@@ -75,5 +78,5 @@ class AlertManager:
                 if self.email_smtp_user and self.email_smtp_password:
                     server.login(self.email_smtp_user, self.email_smtp_password)
                 server.send_message(msg)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("[AlertManager] 邮件通知发送失败: to=%s error=%s", self.email_to, e)

@@ -2908,6 +2908,136 @@ def test_local_trainer_uses_current_python():
         return False
 
 
+# ---------------------------------------------------------------------------
+# 新增测试：OCR + 视频帧采样 + VLM 元数据
+# ---------------------------------------------------------------------------
+
+def test_ocr_role_in_pipeline():
+    """测试：OCR role 被正确识别为内置引擎，不参与训练"""
+    print("\n=== 测试：OCR role 内置引擎识别 ===")
+    try:
+        backend_path = str(PROJECT_ROOT / "backend")
+        if backend_path not in sys.path:
+            sys.path.insert(0, backend_path)
+
+        from services.multi_model_orchestrator import OCR_ROLES, TRAINABLE_ROLES, MultiModelTrainingOrchestrator
+
+        # OCR 在 OCR_ROLES 中但不在 TRAINABLE_ROLES 中
+        assert "ocr" in OCR_ROLES, "OCR role 未在 OCR_ROLES 中"
+        assert "ocr" not in TRAINABLE_ROLES, "OCR 不应在 TRAINABLE_ROLES 中"
+        assert "primary_detector" in TRAINABLE_ROLES, "主检测器应在 TRAINABLE_ROLES 中"
+
+        # model_registry 中的 EasyOCR 条目
+        from services.model_registry import get_model_registry
+        registry = get_model_registry()
+        easyocr = registry.get_model("easyocr")
+        assert easyocr is not None, "EasyOCR 模型未注册"
+        assert "ocr" in easyocr.task_types, "EasyOCR 应支持 ocr 任务"
+        assert easyocr.training_framework == "custom", "OCR 应为 custom 框架"
+
+        print("[OK] OCR role correctly identified as built-in engine")
+        return True
+    except Exception as e:
+        print(f"[FAIL] OCR role test exception: {e}")
+        return False
+
+
+def test_hybrid_frame_sampling():
+    """测试：混合帧采样返回正确的元数据结构"""
+    print("\n=== 测试：混合帧采样 ===")
+    try:
+        backend_path = str(PROJECT_ROOT / "backend")
+        if backend_path not in sys.path:
+            sys.path.insert(0, backend_path)
+
+        import tempfile
+        import os
+
+        # 创建临时测试视频（用 opencv 写一个简单的帧）
+        try:
+            import cv2
+        except ImportError:
+            print("- cv2 不可用，跳过实际视频测试")
+            return True
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "test.mp4")
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(video_path, fourcc, 30.0, (640, 480))
+            import numpy as np
+            for i in range(90):  # 90 帧，3 秒 @ 30fps
+                frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(frame, f"Frame {i}", (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 3)
+                out.write(frame)
+            out.release()
+
+            from services.video_processor import extract_frames_for_vlm
+            frames_b64, frame_meta = extract_frames_for_vlm(video_path, max_frames=8)
+
+            assert len(frames_b64) > 0, "未提取到帧"
+            assert len(frame_meta) > 0, "未返回帧元数据"
+            assert len(frames_b64) == len(frame_meta), "帧数和元数据数不一致"
+
+            # 每条 meta 应包含必需字段
+            for meta in frame_meta:
+                assert "frame_index" in meta, "meta 缺少 frame_index"
+                assert "timestamp_ms" in meta, "meta 缺少 timestamp_ms"
+                assert "source" in meta, "meta 缺少 source"
+                assert meta["source"] in ("keyframe", "uniform"), f"source 值非法: {meta['source']}"
+
+            # 验证 source 字段存在且有效
+            sources = set(m["source"] for m in frame_meta)
+            count_map = {}
+            for s in sources:
+                count_map[s] = sum(1 for m in frame_meta if m["source"] == s)
+        print(f"[OK] Hybrid sampling: extracted {len(frames_b64)} frames, sources: {count_map}")
+        return True
+    except Exception as e:
+        print(f"[FAIL] Hybrid sampling test exception: {e}")
+        return False
+
+
+def test_vlm_video_info_passed():
+    """测试：video_info 被正确传入 VLM prompt 构建"""
+    print("\n=== 测试：VLM video_info 参数 ===")
+    try:
+        backend_path = str(PROJECT_ROOT / "backend")
+        if backend_path not in sys.path:
+            sys.path.insert(0, backend_path)
+
+        from services.vlm_adapter import VLMAdapter
+
+        adapter = VLMAdapter(provider="openai", base_url="https://api.openai.com", api_key="mock-key")
+
+        # 无 video_info
+        prompt_no_vi = adapter._build_system_prompt(sample_boxes=None, video_info=None)
+        assert "视频帧率" not in prompt_no_vi, "无 video_info 时不应包含视频上下文"
+
+        # 有 video_info
+        video_info = {
+            "fps": 30.0,
+            "duration_seconds": 3.0,
+            "width": 1920,
+            "height": 1080,
+        }
+        prompt_with_vi = adapter._build_system_prompt(sample_boxes=None, video_info=video_info)
+        assert "视频帧率" in prompt_with_vi, "有 video_info 时应包含视频帧率"
+        assert "30.0 fps" in prompt_with_vi, "视频帧率值不正确"
+        assert "3.0 秒" in prompt_with_vi, "视频时长值不正确"
+        assert "1920x1080" in prompt_with_vi, "视频分辨率值不正确"
+
+        # parse_intent 签名支持 video_info
+        import inspect
+        sig = inspect.signature(adapter.parse_intent)
+        assert "video_info" in sig.parameters, "parse_intent 缺少 video_info 参数"
+
+        print("[OK] VLM video_info parameter passed correctly")
+        return True
+    except Exception as e:
+        print(f"[FAIL] VLM video_info test exception: {e}")
+        return False
+
+
 def main():
     args = sys.argv[1:] if len(sys.argv) > 1 else ["all"]
 
@@ -2954,6 +3084,9 @@ def main():
         "frontend-build": test_frontend_build,
         "gpu-release": test_gpu_memory_release,
         "local-trainer": test_local_training_subprocess,
+        "ocr-role": test_ocr_role_in_pipeline,
+        "hybrid-frame-sampling": test_hybrid_frame_sampling,
+        "vlm-video-info": test_vlm_video_info_passed,
     }
     groups = {
         "backend": [
@@ -3033,14 +3166,14 @@ def main():
                 sys.path = original_sys_path
 
     print("\n" + "=" * 50)
-    print("测试结果汇总：")
+    print("Test results:")
     for name, passed in results.items():
-        status = "✓ PASS" if passed else "✗ FAIL"
+        status = "[PASS]" if passed else "[FAIL]"
         print(f"  {status}  {name}")
 
     all_passed = all(results.values())
     print("=" * 50)
-    print(f"总体结果：{'✓ ALL PASS' if all_passed else '✗ SOME FAILED'}")
+    print(f"Overall: {'ALL PASS' if all_passed else 'SOME FAILED'}")
     return 0 if all_passed else 1
 
 

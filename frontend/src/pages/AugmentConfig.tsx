@@ -1,11 +1,47 @@
 import { useState } from 'react'
 import { useTaskStore } from '../store/taskStore'
 import { workerClient } from '../api/worker'
+import { trainingApi } from '../api/backend'
 import AugPreview from '../components/AugPreview'
 
 export default function AugmentConfig() {
-  const { taskId, augConfig, setAugConfig, setStage, setTotalImageCount } = useTaskStore()
+  const { taskId, vlmResult, augConfig, setAugConfig, setStage, setTotalImageCount, setSplitStats, setQualityReport } = useTaskStore()
   const [augmenting, setAugmenting] = useState(false)
+  const [preparing, setPreparing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const prepareDatasetAndGoToReview = async (augmentedPaths?: { images: string; labels: string }) => {
+    if (!taskId) return
+    setPreparing(true)
+    setError(null)
+    try {
+      const classNames = (vlmResult?.classes ?? []).map((c) => c.class_name)
+      const result = await trainingApi.prepareDataset({
+        task_id: taskId,
+        class_names: classNames,
+        labeled_images_dir_override: augmentedPaths?.images,
+        labels_dir_override: augmentedPaths?.labels,
+      })
+      const qualityReport = result.quality_report
+      setSplitStats(result.split_stats)
+      setQualityReport({
+        totalImages: qualityReport.total_images,
+        classDistribution: qualityReport.class_distribution.map((c) => ({
+          className: c.class_name,
+          boxCount: c.box_count,
+          avgBoxesPerImage: c.avg_boxes_per_image,
+        })),
+        avgBoxesPerImage: qualityReport.avg_boxes_per_image,
+        warnings: qualityReport.warnings,
+      })
+      setTotalImageCount(result.split_stats.train + result.split_stats.val + result.split_stats.test)
+      setStage('review')
+    } catch (e) {
+      setError(`数据集整理失败: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setPreparing(false)
+    }
+  }
 
   const handleStartAug = () => {
     if (!taskId) {
@@ -14,6 +50,7 @@ export default function AugmentConfig() {
     }
 
     setAugmenting(true)
+    setError(null)
     workerClient.connect()
     workerClient.onMessage((msg) => {
       if (msg.type === 'progress' && msg.stage === 'augmentation') {
@@ -22,9 +59,17 @@ export default function AugmentConfig() {
         })
       }
       if (msg.type === 'stage_complete' && msg.stage === 'augmentation') {
-        setTotalImageCount((msg.result as { total: number }).total)
+        const result = msg.result as { total: number }
+        setTotalImageCount(result.total)
         setAugmenting(false)
-        setStage('review')
+        prepareDatasetAndGoToReview({
+          images: `../backend/uploads/${taskId}/dataset/images/train`,
+          labels: `../backend/uploads/${taskId}/dataset/labels/train`,
+        })
+      }
+      if (msg.type === 'error') {
+        setAugmenting(false)
+        setError(`增强出错: ${String(msg.message ?? '未知错误')}`)
       }
     })
     workerClient.startAugmentation({
@@ -35,6 +80,13 @@ export default function AugmentConfig() {
       target_count: augConfig.targetCount,
       strength: augConfig.strength,
       enabled: augConfig.enabled,
+    })
+  }
+
+  const handleSkipAndGoToReview = () => {
+    prepareDatasetAndGoToReview({
+      images: `../backend/uploads/${taskId}/labeled_images`,
+      labels: `../backend/uploads/${taskId}/labels`,
     })
   }
 
@@ -197,21 +249,27 @@ export default function AugmentConfig() {
       </div>
 
       {/* Actions */}
+      {error && (
+        <div style={{ marginBottom: 16, padding: '12px 16px', background: 'rgba(255,91,79,0.08)', border: '1px solid rgba(255,91,79,0.2)', borderRadius: 8, fontSize: 13, color: 'var(--ship-red)' }}>
+          {error}
+        </div>
+      )}
       <div className="flex gap-3 mt-8">
         <button
           className="btn btn-primary"
           onClick={handleStartAug}
-          disabled={augmenting}
+          disabled={augmenting || preparing}
           style={{
             padding: '10px 24px',
-            background: 'var(--preview-pink)',
+            background: augmenting || preparing ? 'var(--gray-300)' : 'var(--preview-pink)',
             fontWeight: 600,
+            cursor: augmenting || preparing ? 'not-allowed' : 'pointer',
           }}
         >
-          {augmenting ? (
+          {augmenting || preparing ? (
             <>
               <div className="spinner" />
-              增强中...
+              {augmenting ? '增强中...' : '整理数据集...'}
             </>
           ) : (
             <>
@@ -220,7 +278,7 @@ export default function AugmentConfig() {
             </>
           )}
         </button>
-        <button className="btn btn-secondary" onClick={() => setStage('review')}>
+        <button className="btn btn-secondary" onClick={handleSkipAndGoToReview} disabled={preparing}>
           跳过增强
         </button>
         <button className="btn btn-ghost" onClick={() => setStage('labeling')}>

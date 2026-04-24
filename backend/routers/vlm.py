@@ -16,6 +16,7 @@ class VLMParseRequest(BaseModel):
     images_base64: list[str]
     user_text: str
     sample_boxes: Optional[list] = []
+    video_info: Optional[dict] = None
 
 
 class VLMClass(BaseModel):
@@ -69,6 +70,7 @@ def parse_intent(
         images_base64=payload.images_base64,
         user_text=payload.user_text,
         sample_boxes=payload.sample_boxes or [],
+        video_info=payload.video_info or None,
     )
     return {"code": 0, "msg": "ok", "data": result}
 

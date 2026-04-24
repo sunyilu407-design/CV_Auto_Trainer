@@ -125,7 +125,7 @@ ALGORITHM_PLAN_SCHEMA = {
                     "step_id": {"type": "string"},
                     "role": {
                         "type": "string",
-                        "enum": ["primary_detector", "secondary_detector", "classifier", "feature_matcher", "tracker", "rule_engine"],
+                        "enum": ["primary_detector", "secondary_detector", "classifier", "feature_matcher", "tracker", "rule_engine", "ocr"],
                     },
                     "recommended_model_id": {"type": "string", "description": "从可选模型列表中选择的 model_id"},
                     "alternative_model_ids": {
@@ -217,6 +217,7 @@ def _build_system_prompt(
 4. **训练模式**：根据数据量和模型大小建议 local/cloud_ssh/cloud_autodl
 5. **复用优先**：如果已有训练好的模型可用，直接引用，不要重复训练
 6. **用户描述**：negotiation_summary.user_facing_description_zh 要通俗易懂，不能出现技术术语
+7. **文字识别（OCR）**：如果场景需要从图像中识别文字（如油品名称、车牌、编号等），必须设计一个 role="ocr" 的 pipeline 步骤，recommended_model_id 固定为 "easyocr"，requires_training 必须为 false。OCR 步骤通常接在检测步骤之后，对检测框裁剪区域进行文字识别。
 
 ## 输出格式
 请严格按照 JSON 格式输出，不要包含任何额外文本。"""

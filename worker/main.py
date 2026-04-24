@@ -3,9 +3,54 @@ import os
 import uvicorn
 import torch
 import gc
+import httpx
+from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pipeline.gpu_manager import cancel_current_stage, get_device, get_free_memory_gb, CancelError
+
+
+def _resolve_upload_root() -> Path:
+    """
+    解析后端上传目录的根路径。
+
+    优先级：
+    1. 环境变量 CV_AUTO_TRAINER_UPLOAD_ROOT（绝对路径）
+    2. 检测 Worker 启动位置，自动推导相对路径
+
+    例如：Worker 从项目根目录启动 -> UPLOAD_ROOT = backend/uploads
+          Worker 从 worker/ 目录启动 -> UPLOAD_ROOT = ../backend/uploads
+    """
+    env_root = os.getenv("CV_AUTO_TRAINER_UPLOAD_ROOT", "").strip()
+    if env_root:
+        p = Path(env_root)
+        return p if p.is_absolute() else (Path.cwd() / p)
+
+    # 自动检测：Worker 的 __file__ 是 worker/main.py
+    # project_root = worker/../ = 项目根目录
+    worker_file = Path(__file__).resolve()
+    project_root = worker_file.parent.parent
+    backend_dir = project_root / "backend"
+    uploads = backend_dir / "uploads"
+
+    # 检查 uploads 是否在预期位置，以确认项目结构
+    if uploads.exists():
+        return uploads
+    # 回退：假设 Worker 从 worker/ 启动，backend 是同级的兄弟目录
+    return Path("../backend/uploads")
+
+
+# 共享的配置
+WORKER_ALLOWED_ORIGINS = _parse_allowed_origins()
+WORKER_HOST = os.getenv("CV_AUTO_TRAINER_WORKER_HOST", "127.0.0.1")
+WORKER_PORT = int(os.getenv("CV_AUTO_TRAINER_WORKER_PORT", "7860"))
+
+# 后端回调配置
+_WORKER_CALLBACK_SECRET = os.getenv("CV_AUTO_TRAINER_WORKER_CALLBACK_SECRET", "worker-secret-change-me")
+_BACKEND_BASE_URL = os.getenv("CV_AUTO_TRAINER_BACKEND_URL", "http://localhost:8000")
+
+# 上传文件根目录（绝对路径）
+UPLOAD_ROOT = _resolve_upload_root()
 
 
 def _parse_allowed_origins() -> list[str]:
@@ -76,6 +121,8 @@ async def _handle_command(ws: WebSocket, data: dict):
         })
 
         try:
+            use_existing = payload.get("use_existing_labels", False)
+
             # 第一段
             raw_boxes = await asyncio.to_thread(
                 run_detection,
@@ -86,15 +133,33 @@ async def _handle_command(ws: WebSocket, data: dict):
                 iou_threshold=payload.get("iou_threshold", 0.45),
                 batch_size=payload.get("batch_size", 4),
                 progress_callback=make_progress,
+                use_existing_labels=use_existing,
             )
 
-            # 第二段
-            passed = await asyncio.to_thread(
-                run_quality_check,
-                raw_boxes_path=f"{payload['output_raw_dir']}/raw_boxes.json",
-                min_confidence=payload.get("qa_threshold", 0.5),
-                progress_callback=make_progress,
-            )
+            if use_existing:
+                # 预标注数据：跳过 Moondream VQA 质检，直接使用已有标注
+                import json as _json
+
+                await ws.send_json(_build_gpu_info_msg())
+
+                with open(f"{payload['output_raw_dir']}/raw_boxes.json", encoding="utf-8") as _f:
+                    passed = _json.load(_f)
+
+                # 发送质检跳过消息
+                await ws.send_json({
+                    "type": "progress",
+                    "stage": "quality_check_skipped",
+                    "current": image_total,
+                    "total": image_total,
+                })
+            else:
+                # 第二段：Moondream VQA 质检
+                passed = await asyncio.to_thread(
+                    run_quality_check,
+                    raw_boxes_path=f"{payload['output_raw_dir']}/raw_boxes.json",
+                    min_confidence=payload.get("qa_threshold", 0.5),
+                    progress_callback=make_progress,
+                )
 
             await asyncio.to_thread(
                 save_yolo_labels,
@@ -165,28 +230,46 @@ async def _handle_command(ws: WebSocket, data: dict):
                 loop,
             )
 
+        task_id = payload.get("task_id", "")
+        train_config = payload.get("train_config", {})
+
+        # 优先使用 payload 中的绝对路径，否则退化为相对路径（相对 Worker 工作目录）
+        dataset_dir = payload.get("dataset_dir", "dataset")
+
         try:
             artifacts = await asyncio.to_thread(
                 trainer.train,
-                dataset_dir=payload["dataset_dir"],
-                train_config=payload["train_config"],
+                dataset_dir=dataset_dir,
+                train_config=train_config,
                 progress_callback=training_progress_cb,
             )
+
             await ws.send_json({
                 "type": "training_complete",
                 "mode": "local",
+                "task_id": task_id,
                 "artifacts": artifacts,
                 "metrics": {
-                    "bestMap": artifacts.get("best_map", 0.0),
-                    "lastMap": artifacts.get("last_map", 0.0),
+                    "current_epoch": train_config.get("epochs", 100),
+                    "total_epochs": train_config.get("epochs", 100),
+                    "current_map": artifacts.get("best_map", 0.0),
+                    "best_map": artifacts.get("best_map", 0.0),
+                    "last_map": artifacts.get("last_map", 0.0),
                 },
             })
+
+            # 通知后端写入数据库（即使前端 WebSocket 断连也能保证闭环）
+            if task_id:
+                _notify_backend_complete(task_id, artifacts, train_config)
+
         except Exception as e:
             await ws.send_json({
                 "type": "training_error",
                 "message": str(e),
-                "recoverable": payload.get("train_config", {}).get("resume_last", False),
+                "recoverable": train_config.get("resume_last", False),
             })
+            if task_id:
+                _notify_backend_error(task_id, str(e))
 
     elif cmd == "cancel":
         cancel_current_stage()
@@ -194,6 +277,40 @@ async def _handle_command(ws: WebSocket, data: dict):
 
     elif cmd == "ping":
         await ws.send_json({"type": "pong"})
+
+
+def _notify_backend_complete(task_id: str, artifacts: dict, train_config: dict):
+    """训练完成后通知后端写入 artifact_paths 和 mAP"""
+    try:
+        payload = {
+            "task_id": task_id,
+            "status": "complete",
+            "artifacts": artifacts,
+            "metrics": {
+                "current_epoch": train_config.get("epochs", 100),
+                "total_epochs": train_config.get("epochs", 100),
+                "current_map": artifacts.get("best_map", 0.0),
+            },
+        }
+        httpx.post(
+            f"{_BACKEND_BASE_URL}/api/training/worker-callback",
+            json=payload,
+            timeout=15,
+        )
+    except Exception:
+        pass  # 后端回调失败不影响前端体验
+
+
+def _notify_backend_error(task_id: str, error_msg: str):
+    """训练出错后通知后端记录错误"""
+    try:
+        httpx.post(
+            f"{_BACKEND_BASE_URL}/api/training/worker-callback",
+            json={"task_id": task_id, "status": "error", "error_message": error_msg},
+            timeout=15,
+        )
+    except Exception:
+        pass
 
 
 def _build_gpu_info_msg() -> dict:

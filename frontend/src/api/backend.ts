@@ -204,7 +204,7 @@ export interface CapabilityDraft {
 
 export interface ModelPipelineStep {
   step_id: string
-  role: 'primary_detector' | 'secondary_detector' | 'classifier' | 'feature_matcher' | 'tracker' | 'rule_engine'
+  role: 'primary_detector' | 'secondary_detector' | 'classifier' | 'feature_matcher' | 'tracker' | 'rule_engine' | 'ocr'
   recommended_model_id: string
   alternative_model_ids?: string[]
   reason_zh: string
@@ -544,6 +544,47 @@ export const algorithmApi = {
 }
 
 // Training APIs
+export interface SplitStats {
+  train: number
+  val: number
+  test: number
+}
+
+export interface DataQualityReport {
+  total_images: number
+  class_distribution: Array<{
+    class_name: string
+    box_count: number
+    avg_boxes_per_image: number
+  }>
+  avg_boxes_per_image: number
+  warnings: string[]
+}
+
+export interface PrepareDatasetResult {
+  dataset_dir: string
+  data_yaml_path: string
+  split_stats: SplitStats
+  quality_report: DataQualityReport
+}
+
+export interface PreviewDetection {
+  class_name: string
+  confidence: number
+  bbox_xywhn: [number, number, number, number]
+}
+
+export interface PreviewImageResult {
+  imageName: string
+  imageBase64: string
+  detections: PreviewDetection[]
+}
+
+export interface PreviewInferenceResult {
+  total_images: number
+  results: PreviewImageResult[]
+}
+
 export interface TrainStartPayload {
   task_id: string
   model: string
@@ -587,6 +628,33 @@ export interface TrainingEstimate {
 }
 
 export const trainingApi = {
+  prepareDataset: (payload: {
+    task_id: string
+    class_names: string[]
+    labeled_images_dir_override?: string
+    labels_dir_override?: string
+    output_root_override?: string
+    ratios?: [number, number, number]
+    seed?: number
+  }) =>
+    request<PrepareDatasetResult>('/training/prepare-dataset', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeout: 60000,
+    }),
+  previewInference: (payload: {
+    task_id: string
+    weights_path: string
+    sample_images_dir: string
+    conf?: number
+    iou?: number
+    max_images?: number
+  }) =>
+    request<PreviewInferenceResult>('/training/preview-inference', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeout: 60000,
+    }),
   start: (payload: TrainStartPayload) =>
     request<{ instance_id?: string }>('/training/start', {
       method: 'POST',
@@ -728,6 +796,63 @@ export const filesApi = {
         Accept: 'application/octet-stream',
       },
     }),
+  checkExistingAnnotations: (taskId: string, subdir: string = 'images') =>
+    request<{
+      has_annotations: boolean
+      total_images: number
+      annotated_images: number
+      total_boxes: number
+      detected_classes: number[]
+      message: string
+    }>(`/files/${taskId}/check-annotations?subdir=${encodeURIComponent(subdir)}`),
+}
+
+export interface VideoInferenceFrame {
+  frame_idx: number
+  timestamp_ms: number
+  frame_b64: string
+  detections: Array<{ class: string; conf: number; bbox: number[] }>
+  source?: 'keyframe' | 'uniform'
+}
+
+export interface VideoInferenceResult {
+  frames: VideoInferenceFrame[]
+}
+
+export const videoInferenceApi = {
+  run: (taskId: string, videoBlob: Blob, onProgress?: (pct: number) => void): Promise<VideoInferenceResult> => {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${API_BASE}/training/video-inference/${taskId}`)
+      const token = useAuthStore.getState().token
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      const formData = new FormData()
+      formData.append('video', videoBlob, 'video.mp4')
+      xhr.upload.onprogress = (e) => {
+        if (onProgress && e.lengthComputable) {
+          onProgress(Math.round((e.loaded / e.total) * 100))
+        }
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const json = JSON.parse(xhr.responseText)
+            if (typeof json === 'object' && json !== null && 'code' in json) {
+              if (json.code === 0) return resolve(json.data)
+              return reject(new Error(json.msg || 'inference failed'))
+            }
+            resolve(json)
+          } catch (e) { reject(e) }
+        } else {
+          reject(new Error(`HTTP ${xhr.status}`))
+        }
+      }
+      xhr.onerror = () => reject(new Error('网络错误'))
+      xhr.ontimeout = () => reject(new Error('请求超时'))
+      xhr.timeout = 300000
+      xhr.send(formData)
+    })
+  },
 }
 
 // Model Registry APIs

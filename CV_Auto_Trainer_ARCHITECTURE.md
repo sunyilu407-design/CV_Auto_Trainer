@@ -1,7 +1,7 @@
 # CV 自动化训练中台 — 项目架构说明书
 
 > **文档定位**：完整的开发交付物，开发者/AI 可直接依据本文档进行实现，无需额外询问细节。
-> **版本**：v7.0 | **状态**：可直接开始开发 | **更新**：云端训练从 AutoDL 专有方案改为通用 SSH 云服务器方案
+> **版本**：v8.1 | **状态**：可直接开始开发 | **更新**：新增快速预览模式、视频推理演示、训练回调机制、数据集质量报告，数据流与代码完全同步
 
 ---
 
@@ -165,7 +165,9 @@ project-root/
 │   │   │   ├── AugPreview.tsx          # 增强效果实时预览
 │   │   │   ├── MetricsChart.tsx        # mAP/loss 实时曲线
 │   │   │   ├── GpuMonitor.tsx          # 本地 GPU 显存监控
-│   │   │   └── SettingsPanel.tsx       # 全局设置面板
+│   │   │   ├── ModelCacheTab.tsx       # 已训练模型缓存管理
+│   │   │   ├── PreAnnotatedToggle.tsx  # 预标注数据跳过打标开关
+│   │   │   └── SettingsPanel.tsx        # 全局设置面板
 │   │   ├── store/
 │   │   │   ├── taskStore.ts            # 任务全局状态（Zustand）
 │   │   │   └── settingsStore.ts        # 用户设置状态
@@ -179,28 +181,51 @@ project-root/
 │   ├── routers/
 │   │   ├── vlm.py                     # VLM 意图解析接口
 │   │   ├── tasks.py                   # 任务管理 CRUD
-│   │   ├── autodl.py                  # AutoDL 调度接口
-│   │   ├── files.py                   # 文件上传/下载接口
-│   │   └── settings.py                # 用户设置接口
+│   │   ├── algorithm.py              # 算法规划/协商/修订接口
+│   │   ├── files.py                  # 文件上传/下载/预标注检测接口
+│   │   ├── training.py               # 训练启动/状态/取消接口
+│   │   ├── models.py                 # 已训练模型缓存管理接口
+│   │   └── settings.py               # 用户设置接口
 │   ├── services/
-│   │   ├── vlm_adapter.py              # VLM 多厂商适配器
-│   │   ├── autodl_scheduler.py        # AutoDL SSH 状态机
-│   │   ├── dataset_packer.py           # 数据集打包 + data.yaml 生成
-│   │   └── model_exporter.py           # 模型导出调度
+│   │   ├── vlm_adapter.py             # VLM 多厂商适配器
+│   │   ├── vlm_algorithm_planner.py  # VLM 驱动智能算法规划器
+│   │   ├── algorithm_planner.py       # 规则引擎兜底算法规划器
+│   │   ├── algorithm_preview_service.py # 事件预览服务
+│   │   ├── algorithm_package_service.py # 算法工程包导出服务
+│   │   ├── pipeline_compiler.py      # 算法 Pipeline 编译
+│   │   ├── model_registry.py          # 预训练模型目录 + 已训练缓存
+│   │   ├── video_processor.py         # 视频拆帧/抽帧/离线验证
+│   │   ├── cloud_trainer.py          # 云端训练抽象基类
+│   │   ├── autodl_trainer.py         # AutoDL API 云端训练器
+│   │   ├── generic_ssh_trainer.py    # 通用 SSH 云端训练器
+│   │   ├── train_dispatcher.py        # 训练分发器（本地/云端路由）
+│   │   ├── multi_model_orchestrator.py # 多模型优先级编排训练器
+│   │   ├── training_recommendation_service.py # 训练推荐服务
+│   │   ├── task_access.py            # 任务访问权限控制
+│   │   ├── settings_manager.py        # 加密设置管理器
+│   │   └── alert_manager.py          # 告警管理器
 │   └── models/
-│       └── db.py                      # SQLAlchemy 数据库模型
+│       ├── db.py                    # SQLAlchemy ORM 数据库模型
+│       └── database.py              # 数据库连接管理
 │
 ├── worker/                            # 本地 Worker（用户电脑运行）
 │   ├── main.py                        # FastAPI + WebSocket 服务入口
 │   ├── pipeline/
-│   │   ├── stage2_labeler.py          # 阶段二：两段式打标
-│   │   ├── stage25_augmentor.py       # 阶段二点五：数据增强
-│   │   └── gpu_manager.py             # 显存安全管理（gpu_stage）
+│   │   ├── stage2_labeler.py        # 阶段二：两段式打标（含预标注跳过）
+│   │   ├── stage25_augmentor.py     # 阶段二点五：数据增强
+│   │   ├── gpu_manager.py             # 显存安全管理（gpu_stage）
+│   │   ├── package_exporter.py      # 算法工程包导出
+│   │   ├── tracking_runtime.py      # 目标跟踪运行时
+│   │   ├── event_engine.py          # 事件引擎
+│   │   ├── frame_adapter.py         # 帧适配器
+│   │   ├── runtime_session.py        # 运行时会话管理
+│   │   └── local_trainer.py         # 本地训练子进程管理
 │   └── utils/
-│       ├── yolo_io.py                 # YOLO .txt 格式读写
-│       └── dataset_splitter.py        # train/val/test 分层分割
-│
-└── cloud_scripts/                     # 上传至 AutoDL 实例执行的脚本
+│       ├── yolo_io.py               # YOLO .txt 格式读写
+│       ├── dataset_splitter.py       # train/val/test 分层分割
+│       └── image_files.py           # 图片文件工具
+
+└── cloud_scripts/                     # 上传至云端实例执行的脚本
     ├── train.py                       # 统一训练入口（支持断点续训）
     ├── export.py                      # 模型导出
     └── health_check.py                # 训练状态心跳
@@ -378,6 +403,86 @@ class VLMAdapter:
 第一段：加载 YOLO-World → 推理全量图片 → 保存 raw_boxes.json → del model → empty_cache → gc.collect
 第二段：加载 Moondream   → VQA 质检      → 过滤低质量框 → del model → empty_cache → gc.collect
 ```
+
+### 5.1.5 预标注数据跳过打标
+
+若用户已通过 LabelImg / roLabelImg 等工具预先标注好数据（YOLO .txt 格式，放在图片同目录下），
+系统支持跳过两段式打标，直接使用已有标注。
+
+**触发流程：**
+
+1. 用户在「需求协商」页面打开「我已用 LabelImg 标注好数据」开关
+2. 后端 `GET /api/files/{task_id}/check-annotations` 自动检测目录下是否包含 `.txt` 标注文件
+3. 返回检测结果：已标注图片数、总框数、类别索引列表
+4. 打标阶段收到 `use_existing_labels=True` 后，跳过 YOLO-World 和 Moondream，直接从 `.txt` 读取检测框
+5. 打标阶段跳过 VQA 质检（质检分数统一设为 1.0），直接保存 YOLO 标注
+
+**API 接口：**
+
+```bash
+GET /api/files/{task_id}/check-annotations?subdir=images
+# 返回：
+{
+  "has_annotations": true,
+  "total_images": 100,
+  "annotated_images": 87,
+  "total_boxes": 312,
+  "detected_classes": [0, 1, 2],
+  "message": "发现 87/100 张图片已标注，共 312 个框，类别索引 [0, 1, 2]"
+}
+```
+
+**前端状态：**
+
+```typescript
+// frontend/src/store/taskStore.ts
+skipLabeling: boolean  // 跳过打标标志
+setSkipLabeling: (skip: boolean) => void
+```
+
+**Worker 端逻辑：**
+
+```python
+# worker/pipeline/stage2_labeler.py
+
+def run_detection(
+    image_dir: str,
+    classes: list[dict],
+    output_raw_dir: str,
+    # ...
+    use_existing_labels: bool = False,  # 新增参数
+) -> dict:
+    if use_existing_labels:
+        # 直接读取 YOLO .txt 标注文件，跳过 YOLO-World 推理
+        image_paths = list_image_files(image_dir)
+        results_map = {}
+        for img_path in image_paths:
+            label_path = Path(image_dir) / f"{img_path.stem}.txt"
+            if label_path.exists():
+                bboxes, labels = load_yolo_labels(str(label_path))
+                results_map[str(img_path)] = [
+                    {
+                        "class_idx": cls_idx,
+                        "class_name": classes[cls_idx]["class_name"],
+                        "prompt": classes[cls_idx]["prompt"],
+                        "bbox_xywhn": bbox,
+                        "conf": 1.0,
+                        "_source": "existing_label",
+                    }
+                    for cls_idx, bbox in zip(labels, bboxes)
+                ]
+            else:
+                results_map[str(img_path)] = []
+        return results_map
+
+    # 原有 YOLO-World 推理逻辑...
+```
+
+**WebSocket 消息：**
+
+Worker 跳过质检阶段时发送 `stage: "quality_check_skipped"`，前端渲染为"标注导入"一步完成。
+
+
 
 ### 5.2 显存安全管理器
 
@@ -2407,11 +2512,20 @@ class Task(Base):
     # 阶段二点五
     augment_config = Column(JSON)
 
-    # 阶段三统计
+    training_state = Column(String)         # 训练状态：training_local | training_cloud | done | error | cancelled（由 Worker 回调写入）
+    training_progress = Column(JSON)        # 训练进度详情（供前端轮询）
+    training_started_at = Column(DateTime)  # 训练开始时间
+    training_finished_at = Column(DateTime) # 训练结束时间
+
+    # 阶段三统计（数据集打包阶段）
     total_image_count = Column(Integer, default=0)
     train_split_count = Column(Integer, default=0)
     val_split_count = Column(Integer, default=0)
     test_split_count = Column(Integer, default=0)
+
+    # 数据集打包结果（prepare_dataset 接口写入）
+    split_stats = Column(JSON)        # {"train": N, "val": N, "test": N}
+    quality_report = Column(JSON)     # {"total_images": N, "class_distribution": [...], "avg_boxes_per_image": N, "warnings": [...]}
 
     # 训练配置
     train_config = Column(JSON)

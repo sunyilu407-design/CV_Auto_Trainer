@@ -3,6 +3,7 @@ import gc
 import json
 import os
 import re
+from pathlib import Path
 from urllib.error import URLError
 from typing import Optional, Callable
 from pipeline.gpu_manager import gpu_stage, check_cancel_and_yield, CancelError, get_device
@@ -94,10 +95,50 @@ def run_detection(
     iou_threshold: float = 0.45,
     batch_size: int = 4,
     progress_callback: Optional[Callable] = None,
+    use_existing_labels: bool = False,
 ) -> dict:
     """
     第一段：使用 YOLO-World 对全量图片进行目标检测，输出原始框 JSON。
+
+    参数 use_existing_labels: 若为 True，则跳过 YOLO-World 推理，
+    直接从 image_dir 中的 YOLO .txt 标注文件读取检测框，
+    适用于用户已用 LabelImg/roLabelImg 等工具预先标注好的数据集。
     """
+    # 检测预标注数据：查找与图片同名的 .txt 文件
+    if use_existing_labels:
+        from utils.yolo_io import load_yolo_labels
+
+        image_paths = list_image_files(image_dir)
+        if not image_paths:
+            raise ValueError(f"图片目录为空: {image_dir}")
+
+        results_map: dict = {}
+        label_dir = Path(image_dir)
+        for img_path in image_paths:
+            label_path = label_dir / f"{img_path.stem}.txt"
+            if not label_path.exists():
+                results_map[str(img_path)] = []
+                continue
+            bboxes, labels = load_yolo_labels(str(label_path))
+            bboxes, labels = load_yolo_labels(str(label_path))
+            # 转换：class_idx, class_name, bbox_xywhn, conf(=1.0)
+            mapped = []
+            for cls_idx, bbox in zip(labels, bboxes):
+                mapped.append({
+                    "class_idx": int(cls_idx),
+                    "class_name": classes[int(cls_idx)]["class_name"] if int(cls_idx) < len(classes) else f"class_{cls_idx}",
+                    "prompt": classes[int(cls_idx)]["prompt"] if int(cls_idx) < len(classes) else "",
+                    "bbox_xywhn": [float(x) for x in bbox],
+                    "conf": 1.0,
+                    "_source": "existing_label",
+                })
+            results_map[str(img_path)] = mapped
+
+        os.makedirs(output_raw_dir, exist_ok=True)
+        with open(f"{output_raw_dir}/raw_boxes.json", "w", encoding="utf-8") as f:
+            json.dump(results_map, f, ensure_ascii=False)
+        return results_map
+
     model = None
     try:
         with gpu_stage("yolo_detection", required_gb=3.0):

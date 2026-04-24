@@ -32,6 +32,7 @@ class ModelFamily(str, Enum):
     YOLO26 = "yolo26"
     RF_DETR = "rf-detr"
     RT_DETR = "rt-detr"
+    OCR = "ocr"
     CUSTOM = "custom"
 
 
@@ -352,6 +353,33 @@ _BUILTIN_MODELS: list[dict] = [
         "weaknesses": ["非常大", "仅服务器"],
         "use_cases": ["最高精度需求", "服务器部署"],
     },
+    # ── OCR 引擎 ──
+    {
+        "model_id": "easyocr",
+        "family": "ocr",
+        "variant": "default",
+        "display_name": "EasyOCR",
+        "display_name_zh": "EasyOCR 文字识别",
+        "task_types": ["ocr"],
+        "input_size_default": 640,
+        "input_size_options": [320, 640, 1280],
+        "params_m": 0,
+        "flops_g": 0,
+        "map50_coco": None,
+        "map50_95_coco": None,
+        "fps_gpu": 0,
+        "fps_cpu": 0,
+        "min_device_tier": "desktop_cpu",
+        "recommended_device_tiers": ["desktop_cpu", "desktop_gpu", "edge_low", "edge_mid", "edge_high", "apple_silicon"],
+        "export_formats": [],
+        "training_framework": "custom",
+        "weight_url": None,
+        "description": "Pure Python OCR engine, supports 80+ languages, no C++ dependencies",
+        "description_zh": "纯 Python OCR 引擎，支持 80+ 语言，零额外依赖，部署最简单",
+        "strengths": ["纯 Python", "多语言支持", "部署零负担"],
+        "weaknesses": ["精度略低于 PaddleOCR", "CPU 密集"],
+        "use_cases": ["票据识别", "车牌识别", "文档 OCR", "工业读数"],
+    },
 ]
 
 
@@ -430,6 +458,13 @@ class ModelRegistry:
 
         lines = ["可选预训练模型列表："]
         for m in models:
+            if m.family == "ocr":
+                lines.append(
+                    f"- [✓] {m.model_id} ({m.display_name_zh}): "
+                    f"任务={','.join(m.task_types)}, "
+                    f"特点: {m.description_zh}"
+                )
+                continue
             tier_ok = "✓" if device_tier and device_tier in m.recommended_device_tiers else "○"
             lines.append(
                 f"- [{tier_ok}] {m.model_id} ({m.display_name_zh}): "
