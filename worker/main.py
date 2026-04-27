@@ -40,11 +40,6 @@ def _resolve_upload_root() -> Path:
     return Path("../backend/uploads")
 
 
-# 共享的配置
-WORKER_ALLOWED_ORIGINS = _parse_allowed_origins()
-WORKER_HOST = os.getenv("CV_AUTO_TRAINER_WORKER_HOST", "127.0.0.1")
-WORKER_PORT = int(os.getenv("CV_AUTO_TRAINER_WORKER_PORT", "7860"))
-
 # 后端回调配置
 _WORKER_CALLBACK_SECRET = os.getenv("CV_AUTO_TRAINER_WORKER_CALLBACK_SECRET", "worker-secret-change-me")
 _BACKEND_BASE_URL = os.getenv("CV_AUTO_TRAINER_BACKEND_URL", "http://localhost:8000")

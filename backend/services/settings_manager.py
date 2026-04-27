@@ -1,11 +1,14 @@
 import base64
 import hashlib
+import logging
 import os
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.orm import Session
 
 from models.db import UserSettings
+
+logger = logging.getLogger(__name__)
 
 _APP_SECRET = os.getenv("CV_AUTO_TRAINER_SECRET_KEY") or "cv-auto-trainer-dev-secret-key-v1-change-in-prod"
 _KEY = base64.urlsafe_b64encode(hashlib.sha256(_APP_SECRET.encode("utf-8")).digest())
@@ -21,7 +24,11 @@ def encrypt_value(value: str) -> str:
 def decrypt_value(encrypted: str) -> str:
     if not encrypted:
         return ""
-    return _CIPHER.decrypt(encrypted.encode("utf-8")).decode("utf-8")
+    try:
+        return _CIPHER.decrypt(encrypted.encode("utf-8")).decode("utf-8")
+    except InvalidToken:
+        logger.warning("无法解密已存储的凭据（加密密钥可能已变更），请在设置页面重新输入 API Key")
+        return ""
 
 
 def get_settings(db: Session, user_id: int) -> UserSettings:

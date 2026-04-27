@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { algorithmApi, type RuntimeCapability, type TrainingRecommendation } from '../api/backend'
 import { useTaskStore, DEVICE_PROFILES } from '../store/taskStore'
 import { useSettingsStore } from '../store/settingsStore'
@@ -69,6 +69,7 @@ export default function AlgorithmPlan() {
   const { settings } = useSettingsStore()
 
   const [loading, setLoading] = useState(false)
+  const loadingRef = useRef(false)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [revising, setRevising] = useState(false)
@@ -122,9 +123,10 @@ export default function AlgorithmPlan() {
   }
 
   useEffect(() => {
-    if (!taskId || loading || algorithmPlan) return
+    if (!taskId || loadingRef.current || algorithmPlan) return
 
     let cancelled = false
+    loadingRef.current = true
     const load = async () => {
       setLoading(true)
       setError(null)
@@ -155,6 +157,7 @@ export default function AlgorithmPlan() {
           setError(e instanceof Error ? e.message : '能力草图生成失败')
         }
       } finally {
+        loadingRef.current = false
         if (!cancelled) {
           setLoading(false)
         }
@@ -165,7 +168,8 @@ export default function AlgorithmPlan() {
     return () => {
       cancelled = true
     }
-  }, [algorithmPlan, loading, runtimeCapability, setAlgorithmPlan, taskId, userDescription, vlmResult])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [algorithmPlan, runtimeCapability, setAlgorithmPlan, taskId, userDescription, vlmResult])
 
   if (!taskId) {
     return (

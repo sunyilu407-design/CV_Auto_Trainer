@@ -151,8 +151,9 @@ def run_detection(
                 if _is_yolo_world_setup_error(exc):
                     raise _build_yolo_world_setup_error(exc) from exc
                 raise
+            if device == "cuda":
+                model.half()  # FP16 半精度 — 仅 CUDA 支持
             if device in ("cuda", "mps"):
-                model.half()  # FP16 半精度
                 model.to(device)
             try:
                 model.set_classes([c["prompt"] for c in classes])
@@ -232,7 +233,10 @@ def run_quality_check(
             import cv2
 
             device = get_device()
-            dtype = torch.float16 if device != "cpu" else torch.float32
+            dtype = torch.float16 if device == "cuda" else torch.float32
+
+            if progress_callback:
+                progress_callback(0, 1, "loading_moondream")
 
             try:
                 model = AutoModelForCausalLM.from_pretrained(
