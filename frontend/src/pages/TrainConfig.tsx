@@ -202,6 +202,7 @@ export default function TrainConfig() {
           export_formats: trainConfig.exportFormats,
           train_mode: trainConfig.trainMode,
           gpu_type: trainConfig.gpuType,
+          local_device: trainConfig.localDevice,
           resume_last: false,
         })
       } catch (e) {
@@ -451,7 +452,29 @@ export default function TrainConfig() {
         </div>
       )}
 
-      {/* Quick Preview Mode */}
+      {/* Local GPU Device Select */}
+      {trainConfig.trainMode === 'local' && (
+        <div className="card-section" style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12 }}>
+            <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 0 }}>本地 GPU 设备</h3>
+            <SourceBadge label={getSourceMeta('localDevice').label} variant={getSourceMeta('localDevice').variant} />
+          </div>
+          <select
+            className="input"
+            value={trainConfig.localDevice}
+            onChange={(e) => setTrainConfig({ localDevice: Number(e.target.value) })}
+            style={{ maxWidth: 200 }}
+          >
+            <option value={0}>GPU 0（默认）</option>
+            <option value={1}>GPU 1</option>
+            <option value={2}>GPU 2</option>
+            <option value={3}>GPU 3</option>
+          </select>
+          <p style={{ fontSize: 12, color: 'var(--gray-400)', marginTop: 6 }}>
+            如果你有多个 GPU，可以选择使用哪一个。默认使用第一个 GPU。
+          </p>
+        </div>
+      )}
       <div className="card-section" style={{ marginBottom: 16, background: trainConfig.previewMode ? 'rgba(16,185,129,0.04)' : undefined, border: trainConfig.previewMode ? '1px solid rgba(16,185,129,0.2)' : undefined }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
           <div style={{ flex: 1 }}>

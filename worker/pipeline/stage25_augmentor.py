@@ -11,6 +11,7 @@ from utils.image_files import list_image_files
 def build_pipeline(
     strength: str = "medium",
     enabled: Optional[dict] = None,
+    min_visibility: float = 0.3,
 ) -> A.Compose:
     if enabled is None:
         enabled = {k: True for k in ["geometric", "color", "noise", "weather", "occlusion"]}
@@ -69,7 +70,7 @@ def build_pipeline(
         bbox_params=A.BboxParams(
             format="yolo",
             label_fields=["labels"],
-            min_visibility=0.3,
+            min_visibility=min_visibility,
             clip=True,
         ),
     )
@@ -84,6 +85,9 @@ def augment_dataset(
     strength: str = "medium",
     enabled: Optional[dict] = None,
     progress_callback: Optional[Callable] = None,
+    delete_original: bool = False,
+    min_visibility: float = 0.3,
+    max_per_image: int = 10,
 ) -> dict:
     os.makedirs(output_image_dir, exist_ok=True)
     os.makedirs(output_label_dir, exist_ok=True)
@@ -92,9 +96,9 @@ def augment_dataset(
     if not src_images:
         raise ValueError(f"源目录无图片: {src_image_dir}")
 
-    pipeline = build_pipeline(strength, enabled)
+    pipeline = build_pipeline(strength, enabled, min_visibility)
 
-    # 复制原始数据
+    # 复制原始数据（仅复制到增强目录，不覆盖原始目录）
     for img_path in src_images:
         label_path = Path(src_label_dir) / f"{img_path.stem}.txt"
         shutil.copy(img_path, output_image_dir / img_path.name)
@@ -103,7 +107,9 @@ def augment_dataset(
 
     existing = len(src_images)
     needed = max(0, target_count - existing)
-    per_image = math.ceil(needed / existing) if needed > 0 else 0
+    # 每张图最多生成 max_per_image 张增强图
+    per_image_cap = max(1, max_per_image)
+    per_image = min(math.ceil(needed / existing), per_image_cap) if needed > 0 else 0
     generated = 0
 
     for img_path in src_images:
@@ -142,7 +148,24 @@ def augment_dataset(
             except Exception:
                 continue
 
-    return {"existing": existing, "generated": generated, "total": existing + generated}
+    # 可选：删除原图以节省存储（增强图已复制，原图不再需要）
+    if delete_original:
+        deleted_count = 0
+        for img_path in src_images:
+            try:
+                img_path.unlink()
+                label_path = Path(src_label_dir) / f"{img_path.stem}.txt"
+                if label_path.exists():
+                    label_path.unlink()
+                deleted_count += 1
+            except OSError:
+                pass
+
+    return {
+        "existing": existing,
+        "generated": generated,
+        "total": existing + generated,
+    }
 
 
 def _load_yolo_label(label_path: Path) -> tuple[list, list]:

@@ -5,10 +5,11 @@ import { trainingApi } from '../api/backend'
 import AugPreview from '../components/AugPreview'
 
 export default function AugmentConfig() {
-  const { taskId, vlmResult, augConfig, setAugConfig, setStage, setTotalImageCount, setSplitStats, setQualityReport } = useTaskStore()
+  const { taskId, vlmResult, augConfig, setAugConfig, setStage, setTotalImageCount, setSplitStats, setQualityReport, setWasAugmented } = useTaskStore()
   const [augmenting, setAugmenting] = useState(false)
   const [preparing, setPreparing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   const prepareDatasetAndGoToReview = async (augmentedPaths?: { images: string; labels: string }) => {
     if (!taskId) return
@@ -61,10 +62,36 @@ export default function AugmentConfig() {
       if (msg.type === 'stage_complete' && msg.stage === 'augmentation') {
         const result = msg.result as { total: number }
         setTotalImageCount(result.total)
+        setWasAugmented(true)
         setAugmenting(false)
-        prepareDatasetAndGoToReview({
-          images: `../backend/uploads/${taskId}/dataset/images/train`,
-          labels: `../backend/uploads/${taskId}/dataset/labels/train`,
+        // 先获取增强数据的质量报告（基于标注前输出目录），用于 Review 页面展示
+        trainingApi.augQualityReport({
+          task_id: taskId,
+          augmented_images_dir: `../backend/uploads/${taskId}/labeled_images_aug`,
+          augmented_labels_dir: `../backend/uploads/${taskId}/labels_aug`,
+          class_names: (vlmResult?.classes ?? []).map((c) => c.class_name),
+        }).then((report) => {
+          const qr = report.data?.quality_report
+          if (qr) {
+            setQualityReport({
+              totalImages: qr.total_images,
+              classDistribution: qr.class_distribution.map((c) => ({
+                className: c.class_name,
+                boxCount: c.box_count,
+                avgBoxesPerImage: c.avg_boxes_per_image,
+              })),
+              avgBoxesPerImage: qr.avg_boxes_per_image,
+              warnings: qr.warnings,
+            })
+          }
+        }).catch(() => {
+          // 非致命：静默失败，Review 页面会用分割后数据兜底
+        }).finally(() => {
+          // 传完整增强目录（含原始+增强图片），让后端重新分层分割为 train/val/test
+          prepareDatasetAndGoToReview({
+            images: `../backend/uploads/${taskId}/labeled_images_aug`,
+            labels: `../backend/uploads/${taskId}/labels_aug`,
+          })
         })
       }
       if (msg.type === 'error') {
@@ -75,15 +102,19 @@ export default function AugmentConfig() {
     workerClient.startAugmentation({
       src_image_dir: `../backend/uploads/${taskId}/labeled_images`,
       src_label_dir: `../backend/uploads/${taskId}/labels`,
-      output_image_dir: `../backend/uploads/${taskId}/dataset/images/train`,
-      output_label_dir: `../backend/uploads/${taskId}/dataset/labels/train`,
+      output_image_dir: `../backend/uploads/${taskId}/labeled_images_aug`,
+      output_label_dir: `../backend/uploads/${taskId}/labels_aug`,
       target_count: augConfig.targetCount,
       strength: augConfig.strength,
       enabled: augConfig.enabled,
+      delete_original: augConfig.deleteOriginalImages,
+      min_visibility: augConfig.minVisibility,
+      max_per_image: augConfig.maxPerImage,
     })
   }
 
   const handleSkipAndGoToReview = () => {
+    setWasAugmented(false)
     prepareDatasetAndGoToReview({
       images: `../backend/uploads/${taskId}/labeled_images`,
       labels: `../backend/uploads/${taskId}/labels`,
@@ -242,7 +273,71 @@ export default function AugmentConfig() {
           </div>
         </div>
 
-        {/* Right: Preview */}
+        {/* Advanced Parameters */}
+      <div className="card-section" style={{ marginBottom: 16 }}>
+        <button
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'none', border: 'none', cursor: 'pointer',
+            padding: 0, fontSize: 13, fontWeight: 600, color: 'var(--gray-600)',
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            style={{ transform: showAdvanced ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+          高级参数
+        </button>
+
+        {showAdvanced && (
+          <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div className="form-group">
+              <label className="form-label">bbox 最小可见比例</label>
+              <input
+                type="range"
+                min="0.1"
+                max="0.7"
+                step="0.05"
+                value={augConfig.minVisibility}
+                onChange={(e) => setAugConfig({ minVisibility: Number(e.target.value) })}
+                style={{ width: '100%', accentColor: 'var(--preview-pink)' }}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>0.1（保留更多框）</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--preview-pink)' }}>{augConfig.minVisibility.toFixed(2)}</span>
+                <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>0.7（过滤掉更多）</span>
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 4 }}>
+                增强后 bbox 被裁剪超过此比例会被丢弃。值越低小目标保留越多。
+              </p>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">单图最多增强数</label>
+              <input
+                type="range"
+                min="1"
+                max="20"
+                step="1"
+                value={augConfig.maxPerImage}
+                onChange={(e) => setAugConfig({ maxPerImage: Number(e.target.value) })}
+                style={{ width: '100%', accentColor: 'var(--preview-pink)' }}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>1</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--preview-pink)' }}>{augConfig.maxPerImage}</span>
+                <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>20</span>
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 4 }}>
+                每张原图最多生成多少张增强图，防止单张图过度增强。
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Right: Preview */}
         <div>
           <AugPreview strength={augConfig.strength} />
         </div>

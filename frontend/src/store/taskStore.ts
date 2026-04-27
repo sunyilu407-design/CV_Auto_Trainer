@@ -195,6 +195,9 @@ export interface AugmentConfig {
     occlusion: boolean
   }
   deleteOriginalImages: boolean
+  // 高级参数
+  minVisibility: number  // bbox 最小可见比例，低于此值丢弃
+  maxPerImage: number   // 每张原图最多生成几张增强图
 }
 
 export interface TrainConfig {
@@ -208,6 +211,8 @@ export interface TrainConfig {
   exportFormats: ('onnx' | 'engine' | 'coreml' | 'openvino')[]
   trainMode: 'local' | 'cloud'
   gpuType: string
+  // 本地 GPU 训练时使用的设备号，默认 0
+  localDevice: number
   // 快速预览模式：少量数据、短 epoch，快速验证效果
   previewMode: boolean
   previewMaxImages: number
@@ -255,12 +260,13 @@ export interface TaskState {
   labelingProgress: {
     current: number
     total: number
-    phase: 'detection' | 'quality_check'
+    phase: 'detection' | 'quality_check' | 'loading_moondream'
   }
   labeledImageCount: number
 
   // 阶段二点五
   augConfig: AugmentConfig
+  wasAugmented: boolean
   totalImageCount: number
 
   // 阶段三
@@ -295,6 +301,7 @@ export interface TaskState {
   updateVLMClass: (index: number, updates: Partial<VLMClass>) => void
   setSkipLabeling: (skip: boolean) => void
   setAugConfig: (config: Partial<AugmentConfig>) => void
+  setWasAugmented: (value: boolean) => void
   setTrainConfig: (config: Partial<TrainConfig>) => void
   applyRecommendedTrainConfig: (config: Partial<TrainConfig>) => void
   setLabeledImageCount: (count: number) => void
@@ -327,6 +334,8 @@ const defaultAugConfig: AugmentConfig = {
     occlusion: false,
   },
   deleteOriginalImages: false,
+  minVisibility: 0.1,
+  maxPerImage: 10,
 }
 
 const defaultTrainConfig: TrainConfig = {
@@ -340,6 +349,7 @@ const defaultTrainConfig: TrainConfig = {
   exportFormats: ['onnx'],
   trainMode: 'local',
   gpuType: 'RTX 4090',
+  localDevice: 0,
   previewMode: false,
   previewMaxImages: 20,
   previewMaxEpochs: 30,
@@ -370,6 +380,7 @@ export const useTaskStore = create<TaskState>()(
   labeledImageCount: 0,
 
   augConfig: defaultAugConfig,
+  wasAugmented: false,
   totalImageCount: 0,
 
   splitStats: { train: 0, val: 0, test: 0 },
@@ -425,6 +436,8 @@ export const useTaskStore = create<TaskState>()(
 
   setAugConfig: (config) =>
     set((state) => ({ augConfig: { ...state.augConfig, ...config } })),
+
+  setWasAugmented: (value) => set({ wasAugmented: value }),
 
   setTrainConfig: (config) =>
     set((state) => {
@@ -492,6 +505,7 @@ export const useTaskStore = create<TaskState>()(
       labelingProgress: { current: 0, total: 0, phase: 'detection' },
       labeledImageCount: 0,
       augConfig: defaultAugConfig,
+      wasAugmented: false,
       totalImageCount: 0,
       splitStats: { train: 0, val: 0, test: 0 },
       qualityReport: null,

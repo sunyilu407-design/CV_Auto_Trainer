@@ -1,5 +1,6 @@
 import time
 import os
+import io
 import paramiko
 from pathlib import Path
 from typing import Optional, Callable
@@ -69,6 +70,7 @@ class GenericSSHCloudTrainer(CloudTrainer):
             device=self.gpu_device,
         )
         train_cmd = f'python -c "{py_code}"'
+        self._last_train_command = train_cmd
         self._ssh.exec_command(
             f"cd {self.remote_work_dir} && screen -dmS train bash -c '{train_cmd}'"
         )
@@ -82,6 +84,9 @@ class GenericSSHCloudTrainer(CloudTrainer):
                 break
             if status.get("error"):
                 raise RuntimeError(f"训练失败: {status.get('error_msg')}")
+
+        # 训练完成后在云端导出（利用云端 GPU 架构）
+        self._run_cloud_export(train_config)
 
     def _check_training_status(self, cfg: dict) -> dict:
         # Check if the training process is still running
@@ -157,22 +162,52 @@ class GenericSSHCloudTrainer(CloudTrainer):
             except FileNotFoundError:
                 pass
 
+        # 拉取在云端导出的模型文件
         for fmt in cfg.get("export_formats", []):
-            export_local = self._export_model(fmt, local_dir, cfg)
-            if export_local:
-                artifacts[f"model.{fmt}"] = export_local
+            cloud_export_path = f"{self.remote_work_dir}/training_output/exp/weights/best.{fmt}"
+            local_export_path = local_dir / f"model.{fmt}"
+            try:
+                self._sftp.get(cloud_export_path, str(local_export_path))
+                artifacts[f"model.{fmt}"] = str(local_export_path)
+            except FileNotFoundError:
+                # 云端导出失败时退化为本地导出
+                fallback = self._export_model(fmt, local_dir, cfg)
+                if fallback:
+                    artifacts[f"model.{fmt}"] = fallback
 
         return artifacts
 
+    def _run_cloud_export(self, cfg: dict) -> None:
+        """在云端导出模型格式（利用云端 GPU 架构，导出的模型更高效）"""
+        weights = f"{self.remote_work_dir}/training_output/exp/weights/best.pt"
+        script_path = f"{self.remote_work_dir}/_cloud_export.py"
+        lines = [
+            f"from ultralytics import YOLO",
+            f"m = YOLO('{weights}')",
+        ]
+        for fmt in cfg.get("export_formats", []):
+            lines.append(f"m.export(format='{fmt}')")
+        # 写入脚本文件（避免命令行引号嵌套问题）
+        with self._sftp.open(script_path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        self._exec_wait(
+            f"cd {self.remote_work_dir} && python _cloud_export.py",
+            timeout=600,
+        )
+        # 清理临时脚本
+        self._exec_wait(f"rm -f {script_path}", timeout=10)
+
     def _export_model(self, fmt: str, local_dir: Path, cfg: dict) -> Optional[str]:
         weights = f"{self.remote_work_dir}/training_output/exp/weights/best.pt"
-        export_cmd = (
-            f"python -c "
-            f"\"from ultralytics import YOLO; "
-            f"YOLO('{weights}').export(format='{fmt}')\""
+        script_path = f"{self.remote_work_dir}/_export_{fmt}.py"
+        script_body = (
+            f"from ultralytics import YOLO\n"
+            f"YOLO('{weights}').export(format='{fmt}')"
         )
+        with self._sftp.open(script_path, "w") as f:
+            f.write(script_body + "\n")
         self._exec_wait(
-            f"cd {self.remote_work_dir} && {export_cmd}",
+            f"cd {self.remote_work_dir} && python _export_{fmt}.py",
             timeout=600,
         )
         remote = f"{self.remote_work_dir}/training_output/exp/weights/best.{fmt}"
@@ -182,16 +217,24 @@ class GenericSSHCloudTrainer(CloudTrainer):
             return str(local_path)
         except FileNotFoundError:
             return None
+        finally:
+            self._exec_wait(f"rm -f {script_path}", timeout=10)
 
     def shutdown(self):
         self.state = CloudTrainState.SHUTTING_DOWN
-        try:
-            self._ssh.exec_command("shutdown now")
-        except Exception:
-            pass
-        finally:
-            if self._ssh:
-                self._ssh.close()
+        # 安全关机：只关闭训练 screen，不影响其他服务
+        # 等待训练进程自行结束（最多 120 秒），再强制杀掉
+        self._exec_wait(
+            "screen -S train -X quit 2>/dev/null; "
+            "sleep 2; "
+            "pkill -TERM -f 'yolo|train' 2>/dev/null; "
+            "sleep 10; "
+            "pkill -KILL -f 'yolo|train' 2>/dev/null; true",
+            timeout=120,
+        )
+        if self._ssh:
+            self._ssh.close()
+            self._ssh = None
 
     def _alert(self, title: str, detail: str):
         if self._alert_manager:

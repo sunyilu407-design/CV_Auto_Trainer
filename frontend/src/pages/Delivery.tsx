@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTaskStore } from '../store/taskStore'
-import { filesApi, trainingApi, TrainingReport, taskApi } from '../api/backend'
-import { algorithmApi } from '../api/backend'
+import { filesApi, trainingApi, TrainingReport, taskApi, algorithmApi } from '../api/backend'
 
 interface MultiModelArtifact {
   source: 'trained' | 'reuse' | 'failed'

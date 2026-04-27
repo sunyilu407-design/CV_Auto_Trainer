@@ -69,6 +69,7 @@ class LocalTrainer:
         lr0 = cfg.get("lr0", 0.01)
         patience = cfg.get("patience", 20)
         project = str(Path(self._output_dir).parent)
+        device = cfg.get("device", 0)
         resume_str = (
             ", resume='" + str(self._output_dir / 'weights' / 'last.pt') + "'"
             if cfg.get("resume_last", False) else ""
@@ -81,7 +82,7 @@ class LocalTrainer:
             f"model.train(data='{data_yaml}', "
             f"epochs={epochs}, imgsz={imgsz}, lr0={lr0}, "
             f"patience={patience}, project='{project}', "
-            f"name='exp', exist_ok=True, device=0{resume_str})",
+            f"name='exp', exist_ok=True, device={device}{resume_str})",
         ]
         return cmd
 

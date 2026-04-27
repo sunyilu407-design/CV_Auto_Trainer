@@ -223,7 +223,8 @@ def prepare_full_dataset(
         output_path=str(Path(output_root) / "data.yaml"),
     )
     quality_report = compute_quality_report(
-        label_dir=labels_dir,
+        # 使用分割后的标签目录（包含增强图标签），而非原始目录
+        label_dir=str(Path(output_root) / "labels"),
         class_names=class_names,
     )
     return {

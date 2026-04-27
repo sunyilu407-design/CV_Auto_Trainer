@@ -597,6 +597,7 @@ export interface TrainStartPayload {
   export_formats: string[]
   train_mode: 'local' | 'cloud'
   gpu_type: string
+  local_device: number
   resume_last: boolean
 }
 
@@ -641,6 +642,33 @@ export const trainingApi = {
       method: 'POST',
       body: JSON.stringify(payload),
       timeout: 60000,
+    }),
+  /**
+   * 获取增强后数据的质量报告（基于增强输出目录，非分割后目录）。
+   * 增强完成后调用此接口，替换 Review 页面的统计数据。
+   */
+  augQualityReport: (payload: {
+    task_id: string
+    augmented_images_dir: string
+    augmented_labels_dir: string
+    class_names: string[]
+  }) =>
+    request<{
+      code: number
+      msg: string
+      data: {
+        quality_report: {
+          total_images: number
+          class_distribution: Array<{ class_name: string; box_count: number; avg_boxes_per_image: number }>
+          avg_boxes_per_image: number
+          warnings: string[]
+        }
+        augmented_images_count: number
+      }
+    }>('/training/aug-quality-report', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeout: 30000,
     }),
   previewInference: (payload: {
     task_id: string

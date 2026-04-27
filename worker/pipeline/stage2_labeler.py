@@ -13,6 +13,19 @@ CLIP_CACHE_DISPLAY_PATH = "~/.cache/clip/ViT-B-32.pt"
 HF_CACHE_DISPLAY_PATH = "~/.cache/huggingface/hub"
 YOLO_WORLD_WEIGHT_NAME = "yolov8s-world.pt"
 MOONDREAM_MODEL_ID = "vikhyatk/moondream2"
+# HuggingFace Hub 下载超时（秒），国内网络建议设高一些
+HF_HUB_DOWNLOAD_TIMEOUT = int(os.getenv("HF_HUB_DOWNLOAD_TIMEOUT", "300"))
+
+# 国内网络优先使用 HF Mirror，避免 huggingface.co 超时
+_HF_ENDPOINT = os.getenv("HF_ENDPOINT", "").strip()
+if not _HF_ENDPOINT:
+    # 自动检测并设置 hf-mirror.com（国内镜像）
+    import socket
+    try:
+        socket.create_connection(("huggingface.co", 443), timeout=5).close()
+    except OSError:
+        # huggingface.co 无法直连，切换到国内镜像
+        os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 
 class DetectionSetupError(RuntimeError):
@@ -119,7 +132,6 @@ def run_detection(
             if not label_path.exists():
                 results_map[str(img_path)] = []
                 continue
-            bboxes, labels = load_yolo_labels(str(label_path))
             bboxes, labels = load_yolo_labels(str(label_path))
             # 转换：class_idx, class_name, bbox_xywhn, conf(=1.0)
             mapped = []
@@ -238,15 +250,21 @@ def run_quality_check(
             if progress_callback:
                 progress_callback(0, 1, "loading_moondream")
 
+            hf_endpoint = os.environ.get("HF_ENDPOINT", "")
+            if hf_endpoint:
+                print(f"[Moondream2] Using HuggingFace endpoint: {hf_endpoint}")
+            print(f"[Moondream2] Loading model {MOONDREAM_MODEL_ID} (first time may take a few minutes)...")
             try:
                 model = AutoModelForCausalLM.from_pretrained(
                     MOONDREAM_MODEL_ID,
                     trust_remote_code=True,
                     torch_dtype=dtype,
+                    timeout=HF_HUB_DOWNLOAD_TIMEOUT,
                 ).to(device)
                 tokenizer = AutoTokenizer.from_pretrained(
                     MOONDREAM_MODEL_ID,
                     trust_remote_code=True,
+                    timeout=HF_HUB_DOWNLOAD_TIMEOUT,
                 )
             except Exception as exc:
                 if _is_moondream_setup_error(exc):

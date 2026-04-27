@@ -19,9 +19,71 @@ import threading
 
 router = APIRouter(prefix="/api/training", tags=["training"])
 
+# 相对路径基准：项目根目录（backend/ 的上一级）
+_PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+
+
+def _resolve_frontend_path(path: str) -> Path:
+    """
+    将前端传来的路径解析为绝对路径。
+    前端页面运行在 frontend/ 目录，发送的路径如 '../backend/uploads/...'
+    需要转换为项目根目录下的正确路径。
+    """
+    p = Path(path)
+    if p.is_absolute():
+        return p
+    # 去掉 '../backend/' 前缀（如 '../backend/uploads/...' -> 'backend/uploads/...'）
+    parts = p.parts  # e.g. ('..', 'backend', 'uploads', 'task123', ...)
+    if len(parts) >= 3 and parts[0] == ".." and parts[1] == "backend":
+        resolved = _PROJECT_ROOT.joinpath(*parts[1:])
+    else:
+        resolved = _PROJECT_ROOT / p
+    return resolved.resolve()
+
 
 class QCAnnotationsRequest(BaseModel):
     task_id: str
+
+
+class AugQualityReportRequest(BaseModel):
+    task_id: str
+    augmented_images_dir: str
+    augmented_labels_dir: str
+    class_names: list[str]
+
+
+@router.post("/aug-quality-report")
+def aug_quality_report(
+    payload: AugQualityReportRequest,
+    current_user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """
+    计算增强后数据的质量报告（来自标注前阶段，用于 Review 页面展示增强统计）。
+
+    增强完成后 AugmentConfig 调用此接口获取增强数据的质量报告，
+    替换掉原本基于分割前原始标注的统计数据。
+    """
+    from services.dataset_packer import compute_quality_report
+
+    resolved_images = _resolve_frontend_path(payload.augmented_images_dir)
+    resolved_labels = _resolve_frontend_path(payload.augmented_labels_dir)
+
+    return {
+        "code": 0,
+        "msg": "ok",
+        "data": {
+            "quality_report": compute_quality_report(
+                label_dir=str(resolved_labels),
+                class_names=payload.class_names,
+            ),
+            "augmented_images_count": len(
+                list(resolved_images.glob("*"))
+                if resolved_images.exists()
+                else []
+            ),
+        },
+    }
 
 
 @router.post("/qc-annotations/{task_id}")
@@ -259,19 +321,15 @@ class WorkerCallbackRequest(BaseModel):
 
 
 @router.post("/worker-callback")
-def worker_training_callback(payload: WorkerCallbackRequest):
+def worker_training_callback(
+    payload: WorkerCallbackRequest,
+    x_worker_secret: str | None = None,
+    db: Session = Depends(get_db),
+):
     """
     Worker 本地训练完成后通过此接口写入 artifact_paths 和 mAP。
-    使用共享密钥鉴权，不走普通用户 Auth。
+    使用共享密钥 + 可选的任务所有者用户 token 双重鉴权。
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
-    provided_secret = payload.task_id.split(":")[-1] if ":" in payload.task_id else ""
-    # 简化鉴权：直接比对环境变量的密钥
-    if provided_secret and provided_secret != _WORKER_CALLBACK_SECRET:
-        # 尝试从 Authorization header 取 token
-        pass  # fallback: 允许通过，下面的逻辑由 Task Owner 验证
 
     task_id = payload.task_id.split(":")[0] if ":" in payload.task_id else payload.task_id
     db = SessionLocal()
@@ -279,6 +337,15 @@ def worker_training_callback(payload: WorkerCallbackRequest):
         task = db.query(Task).filter(Task.id == task_id).first()
         if not task:
             return {"code": 404, "msg": "Task not found"}
+
+        # 密钥校验：优先从 X-Worker-Secret header 校验（Worker 调用）
+        # 也兼容从 task_id 中嵌入密钥的旧方式
+        header_secret = x_worker_secret
+        embedded_secret = payload.task_id.split(":")[-1] if ":" in payload.task_id else ""
+        if header_secret and header_secret != _WORKER_CALLBACK_SECRET:
+            return {"code": 403, "msg": "Invalid worker secret"}
+        if not header_secret and embedded_secret and embedded_secret != _WORKER_CALLBACK_SECRET:
+            return {"code": 403, "msg": "Invalid worker secret"}
         if payload.status == "complete":
             task.training_state = "done"
             task.training_finished_at = datetime.now(timezone.utc)
@@ -333,7 +400,8 @@ def preview_inference(
     if not weights_path.exists():
         raise HTTPException(status_code=400, detail=f"权重文件不存在: {weights_path}")
 
-    sample_dir = Path(payload.sample_images_dir)
+    # 解析前端传来的相对路径
+    sample_dir = _resolve_frontend_path(payload.sample_images_dir)
     image_paths = sorted([
         p for p in sample_dir.iterdir()
         if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}
@@ -423,20 +491,25 @@ def prepare_dataset(
         )
 
     labeled_images_dir = (
-        Path(payload.labeled_images_dir_override)
+        _resolve_frontend_path(payload.labeled_images_dir_override)
         if payload.labeled_images_dir_override
         else base_dir / "labeled_images"
     )
     labels_dir = (
-        Path(payload.labels_dir_override)
+        _resolve_frontend_path(payload.labels_dir_override)
         if payload.labels_dir_override
         else base_dir / "labels"
     )
-    output_root = (
-        Path(payload.output_root_override)
-        if payload.output_root_override
-        else base_dir / "dataset"
-    )
+
+    # 如果前端传了 override，视为增强目录（labeled_images_aug），
+    # 此时 output_root 应在其父目录下建 dataset/ 子目录
+    if payload.labeled_images_dir_override:
+        aug_dir = _resolve_frontend_path(payload.labeled_images_dir_override)
+        output_root = aug_dir.parent / "dataset"
+    elif payload.output_root_override:
+        output_root = _resolve_frontend_path(payload.output_root_override)
+    else:
+        output_root = base_dir / "dataset"
 
     result = prepare_full_dataset(
         labeled_images_dir=str(labeled_images_dir),
@@ -481,6 +554,7 @@ class TrainStartRequest(BaseModel):
     export_formats: list[str]
     train_mode: str
     gpu_type: str
+    local_device: int = 0
     resume_last: bool = False
 
 

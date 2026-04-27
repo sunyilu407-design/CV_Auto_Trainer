@@ -147,6 +147,9 @@ class AutoDLCloudTrainer(CloudTrainer):
                     recovery_info=self.get_recovery_info(train_config, error_msg=status.get("error_msg", "")),
                 )
 
+        # 训练完成后在云端导出（利用云端 GPU 架构）
+        self._run_cloud_export(train_config)
+
     def get_recovery_info(self, train_config: dict, error_msg: str = "") -> dict:
         """
         返回手动恢复所需的全部信息：SSH、数据集位置、训练命令。
@@ -225,6 +228,24 @@ class AutoDLCloudTrainer(CloudTrainer):
             "current_map": current_map,
         }
 
+    def _run_cloud_export(self, cfg: dict) -> None:
+        """在云端导出模型格式"""
+        weights = "/root/training_output/exp/weights/best.pt"
+        script_path = "/root/_cloud_export.py"
+        lines = [
+            f"from ultralytics import YOLO",
+            f"m = YOLO('{weights}')",
+        ]
+        for fmt in cfg.get("export_formats", []):
+            lines.append(f"m.export(format='{fmt}')")
+        with self._sftp.open(script_path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        self._exec_wait(
+            "cd /root && python _cloud_export.py",
+            timeout=600,
+        )
+        self._exec_wait("rm -f /root/_cloud_export.py", timeout=10)
+
     def pull_artifacts(self, cfg: dict) -> dict:
         self.state = CloudTrainState.PULLING
         local_dir = f"/tmp/artifacts/{self._instance_id}"
@@ -247,21 +268,30 @@ class AutoDLCloudTrainer(CloudTrainer):
                 artifacts[fname] = local_path
             except FileNotFoundError:
                 pass
+        # 拉取在云端导出的模型文件
         for fmt in cfg.get("export_formats", []):
-            export_local = self._export_model(fmt, local_dir)
-            if export_local:
-                artifacts[f"model.{fmt}"] = export_local
+            cloud_export_path = f"/root/training_output/exp/weights/best.{fmt}"
+            local_export_path = f"{local_dir}/model.{fmt}"
+            try:
+                self._sftp.get(cloud_export_path, local_export_path)
+                artifacts[f"model.{fmt}"] = local_export_path
+            except FileNotFoundError:
+                export_local = self._export_model(fmt, local_dir)
+                if export_local:
+                    artifacts[f"model.{fmt}"] = export_local
         return artifacts
 
     def _export_model(self, fmt: str, local_dir: str) -> Optional[str]:
         weights = "/root/training_output/exp/weights/best.pt"
-        export_cmd = (
-            f"python -c "
-            f"\"from ultralytics import YOLO; "
-            f"YOLO('{weights}').export(format='{fmt}')\""
+        script_path = "/root/_export_model.py"
+        script_body = (
+            f"from ultralytics import YOLO\n"
+            f"YOLO('{weights}').export(format='{fmt}')"
         )
+        with self._sftp.open(script_path, "w") as f:
+            f.write(script_body + "\n")
         self._exec_wait(
-            f"cd /root && {export_cmd}",
+            f"cd /root && python _export_model.py",
             timeout=600,
         )
         remote = f"/root/training_output/exp/weights/best.{fmt}"
@@ -271,6 +301,8 @@ class AutoDLCloudTrainer(CloudTrainer):
             return local
         except FileNotFoundError:
             return None
+        finally:
+            self._exec_wait("rm -f /root/_export_model.py", timeout=10)
 
     def shutdown(self):
         self.state = CloudTrainState.SHUTTING_DOWN

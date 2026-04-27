@@ -3,7 +3,7 @@ import { useTaskStore } from '../store/taskStore'
 import { filesApi } from '../api/backend'
 
 export default function ReviewSamples() {
-  const { taskId, qualityReport, splitStats, setStage } = useTaskStore()
+  const { taskId, qualityReport, splitStats, setStage, wasAugmented } = useTaskStore()
   const [vlmQcLoading, setVlmQcLoading] = useState(false)
   const [vlmQcResult, setVlmQcResult] = useState<string | null>(null)
   const [vlmQcError, setVlmQcError] = useState<string | null>(null)
@@ -60,7 +60,11 @@ export default function ReviewSamples() {
           </div>
         </div>
         <h1 className="page-title">数据质量评估</h1>
-        <p className="page-subtitle">查看数据集统计与类别分布，确认无误后进入训练阶段</p>
+        <p className="page-subtitle">
+          {wasAugmented
+            ? '已应用数据增强，统计基于增强后标注'
+            : '查看数据集统计与类别分布，确认无误后进入训练阶段'}
+        </p>
       </div>
 
       {/* VLM Annotation QC */}

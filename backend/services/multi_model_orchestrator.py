@@ -112,10 +112,6 @@ class MultiModelTrainingOrchestrator:
             logger.info("No trainable steps in model_pipeline, skip orchestration")
             return {"multi_model_artifacts": {}, "primary_artifacts": {}}
 
-        multi_artifacts: Dict[str, Dict[str, Any]] = {}
-        # OCR 步骤直接写入 artifacts（无需训练）
-        multi_artifacts.update(ocr_artifacts)
-
         mode_str = base_train_config.get("train_mode", "cloud")
         if mode_str == "local" and len(steps) > 1:
             raise LocalMultiModelNotSupported(
@@ -136,6 +132,8 @@ class MultiModelTrainingOrchestrator:
 
         multi_artifacts: Dict[str, Dict[str, Any]] = {}
         primary_artifacts: Dict[str, Any] = {}
+        # OCR 步骤直接写入 artifacts（无需训练）
+        multi_artifacts.update(ocr_artifacts)
 
         total = len(steps)
         for idx, step in enumerate(steps):

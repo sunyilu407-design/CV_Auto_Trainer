@@ -5,6 +5,23 @@ import torch
 import gc
 import httpx
 from pathlib import Path
+
+# 相对路径基准：项目根目录
+_PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+
+
+def _resolve_path(p: str) -> Path:
+    """将前端传来的相对路径解析为绝对路径，与后端 _resolve_frontend_path 保持一致。"""
+    path = Path(p)
+    if path.is_absolute():
+        return path
+    # 去掉 '../backend/' 前缀（如 '../backend/uploads/...' -> 'backend/uploads/...'）
+    parts = path.parts
+    if len(parts) >= 3 and parts[0] == ".." and parts[1] == "backend":
+        resolved = _PROJECT_ROOT.joinpath(*parts[1:])
+    else:
+        resolved = _PROJECT_ROOT / path
+    return resolved.resolve()
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pipeline.gpu_manager import cancel_current_stage, get_device, get_free_memory_gb, CancelError
@@ -94,19 +111,25 @@ async def _handle_command(ws: WebSocket, data: dict):
         from utils.yolo_io import save_yolo_labels
         from utils.image_files import list_image_files
 
-        def make_progress(current, total, phase):
-            asyncio.run_coroutine_threadsafe(ws.send_json(_build_gpu_info_msg()), loop)
-            asyncio.run_coroutine_threadsafe(
-                ws.send_json({
-                    "type": "progress",
-                    "stage": phase,
-                    "current": current,
-                    "total": total,
-                }),
-                loop,
-            )
+        # 解析前端传来的相对路径
+        resolved_image_dir = str(_resolve_path(payload["image_dir"]))
+        resolved_output_raw_dir = str(_resolve_path(payload["output_raw_dir"]))
+        resolved_output_label_dir = str(_resolve_path(payload["output_label_dir"]))
+        resolved_output_image_dir = str(_resolve_path(payload["output_image_dir"]))
 
-        image_total = len(list_image_files(payload["image_dir"]))
+        def _send(msg: dict):
+            asyncio.run_coroutine_threadsafe(ws.send_json(msg), loop)
+
+        def make_progress(current, total, phase):
+            _send(_build_gpu_info_msg())
+            _send({
+                "type": "progress",
+                "stage": phase,
+                "current": current,
+                "total": total,
+            })
+
+        image_total = len(list_image_files(resolved_image_dir))
         await ws.send_json(_build_gpu_info_msg())
         await ws.send_json({
             "type": "progress",
@@ -121,9 +144,9 @@ async def _handle_command(ws: WebSocket, data: dict):
             # 第一段
             raw_boxes = await asyncio.to_thread(
                 run_detection,
-                image_dir=payload["image_dir"],
+                image_dir=resolved_image_dir,
                 classes=payload["classes"],
-                output_raw_dir=payload["output_raw_dir"],
+                output_raw_dir=resolved_output_raw_dir,
                 conf_threshold=payload.get("conf_threshold", 0.25),
                 iou_threshold=payload.get("iou_threshold", 0.45),
                 batch_size=payload.get("batch_size", 4),
@@ -137,7 +160,7 @@ async def _handle_command(ws: WebSocket, data: dict):
 
                 await ws.send_json(_build_gpu_info_msg())
 
-                with open(f"{payload['output_raw_dir']}/raw_boxes.json", encoding="utf-8") as _f:
+                with open(f"{resolved_output_raw_dir}/raw_boxes.json", encoding="utf-8") as _f:
                     passed = _json.load(_f)
 
                 # 发送质检跳过消息
@@ -151,7 +174,7 @@ async def _handle_command(ws: WebSocket, data: dict):
                 # 第二段：Moondream VQA 质检
                 passed = await asyncio.to_thread(
                     run_quality_check,
-                    raw_boxes_path=f"{payload['output_raw_dir']}/raw_boxes.json",
+                    raw_boxes_path=f"{resolved_output_raw_dir}/raw_boxes.json",
                     min_confidence=payload.get("qa_threshold", 0.5),
                     progress_callback=make_progress,
                 )
@@ -159,8 +182,8 @@ async def _handle_command(ws: WebSocket, data: dict):
             await asyncio.to_thread(
                 save_yolo_labels,
                 passed,
-                output_label_dir=payload["output_label_dir"],
-                output_image_dir=payload["output_image_dir"],
+                output_label_dir=resolved_output_label_dir,
+                output_image_dir=resolved_output_image_dir,
             )
 
             await ws.send_json({
@@ -174,27 +197,30 @@ async def _handle_command(ws: WebSocket, data: dict):
     elif cmd == "start_augmentation":
         from pipeline.stage25_augmentor import augment_dataset
 
+        def _send(msg: dict):
+            asyncio.run_coroutine_threadsafe(ws.send_json(msg), loop)
+
         def aug_progress(current, total, _phase):
-            asyncio.run_coroutine_threadsafe(
-                ws.send_json({
-                    "type": "progress",
-                    "stage": "augmentation",
-                    "current": current,
-                    "total": total,
-                }),
-                loop,
-            )
+            _send({
+                "type": "progress",
+                "stage": "augmentation",
+                "current": current,
+                "total": total,
+            })
 
         result = await asyncio.to_thread(
             augment_dataset,
-            src_image_dir=payload["src_image_dir"],
-            src_label_dir=payload["src_label_dir"],
-            output_image_dir=payload["output_image_dir"],
-            output_label_dir=payload["output_label_dir"],
+            src_image_dir=str(_resolve_path(payload["src_image_dir"])),
+            src_label_dir=str(_resolve_path(payload["src_label_dir"])),
+            output_image_dir=str(_resolve_path(payload["output_image_dir"])),
+            output_label_dir=str(_resolve_path(payload["output_label_dir"])),
             target_count=payload["target_count"],
             strength=payload.get("strength", "medium"),
             enabled=payload.get("enabled"),
             progress_callback=aug_progress,
+            delete_original=payload.get("delete_original", False),
+            min_visibility=payload.get("min_visibility", 0.1),
+            max_per_image=payload.get("max_per_image", 10),
         )
 
         await ws.send_json({
@@ -213,23 +239,24 @@ async def _handle_command(ws: WebSocket, data: dict):
 
         trainer = LocalTrainer()
 
+        def _send(msg: dict):
+            asyncio.run_coroutine_threadsafe(ws.send_json(msg), loop)
+
         def training_progress_cb(status: dict):
-            asyncio.run_coroutine_threadsafe(
-                ws.send_json({
-                    "type": "training_progress",
-                    "currentEpoch": status.get("current_epoch", 0),
-                    "totalEpochs": status.get("total_epochs", 100),
-                    "currentMap": status.get("current_map", 0.0),
-                    "done": status.get("done", False),
-                }),
-                loop,
-            )
+            _send({
+                "type": "training_progress",
+                "currentEpoch": status.get("current_epoch", 0),
+                "totalEpochs": status.get("total_epochs", 100),
+                "currentMap": status.get("current_map", 0.0),
+                "done": status.get("done", False),
+            })
 
         task_id = payload.get("task_id", "")
         train_config = payload.get("train_config", {})
 
-        # 优先使用 payload 中的绝对路径，否则退化为相对路径（相对 Worker 工作目录）
-        dataset_dir = payload.get("dataset_dir", "dataset")
+        # 解析前端传来的相对路径（如 '../backend/uploads/...' -> 项目根目录下的绝对路径）
+        raw_dataset_dir = payload.get("dataset_dir", "dataset")
+        dataset_dir = str(_resolve_path(raw_dataset_dir))
 
         try:
             artifacts = await asyncio.to_thread(
@@ -290,6 +317,7 @@ def _notify_backend_complete(task_id: str, artifacts: dict, train_config: dict):
         httpx.post(
             f"{_BACKEND_BASE_URL}/api/training/worker-callback",
             json=payload,
+            headers={"X-Worker-Secret": _WORKER_CALLBACK_SECRET},
             timeout=15,
         )
     except Exception:
@@ -302,6 +330,7 @@ def _notify_backend_error(task_id: str, error_msg: str):
         httpx.post(
             f"{_BACKEND_BASE_URL}/api/training/worker-callback",
             json={"task_id": task_id, "status": "error", "error_message": error_msg},
+            headers={"X-Worker-Secret": _WORKER_CALLBACK_SECRET},
             timeout=15,
         )
     except Exception:

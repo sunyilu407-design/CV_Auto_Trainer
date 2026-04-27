@@ -23,7 +23,7 @@ interface MultiModelArtifact {
 }
 
 export default function TrainingMonitor() {
-  const { taskId, trainingProgress, trainConfig, setStage, setTrainingProgress, setArtifacts, artifacts, previewResults, setPreviewResults } = useTaskStore()
+  const { taskId, trainingProgress, trainConfig, setStage, setTrainingProgress, setArtifacts, artifacts, previewResults, setPreviewResults, wasAugmented } = useTaskStore()
   const { settings } = useSettingsStore()
   const [autoDLRecovery, setAutoDLRecovery] = useState<AutoDLRecoveryInfo | null>(null)
   const [recoverySteps, setRecoverySteps] = useState<AutoDLRecoveryStep[]>([])
@@ -95,10 +95,14 @@ export default function TrainingMonitor() {
 
     setPreviewLoading(true)
     setPreviewError(null)
+    // 增强后用增强数据集的 train 集预览，未增强则用原始 labeled_images
+    const previewDir = wasAugmented
+      ? `../backend/uploads/${taskId}/labeled_images_aug`
+      : `../backend/uploads/${taskId}/labeled_images`
     trainingApi.previewInference({
       task_id: taskId,
       weights_path: bestWeight,
-      sample_images_dir: `../backend/uploads/${taskId}/labeled_images`,
+      sample_images_dir: previewDir,
       conf: trainConfig.conf,
       iou: trainConfig.iou,
       max_images: 8,
@@ -119,7 +123,7 @@ export default function TrainingMonitor() {
     }).finally(() => {
       setPreviewLoading(false)
     })
-  }, [trainingProgress?.state, artifacts, taskId, trainConfig.conf, trainConfig.iou])
+  }, [trainingProgress?.state, artifacts, taskId, trainConfig.conf, trainConfig.iou, wasAugmented])
 
   const handleCancel = async () => {
     if (trainConfig.trainMode === 'local') {

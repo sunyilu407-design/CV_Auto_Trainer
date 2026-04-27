@@ -162,6 +162,9 @@ class WorkerClient {
       weather?: boolean
       occlusion?: boolean
     }
+    delete_original?: boolean
+    min_visibility?: number
+    max_per_image?: number
   }) {
     this.send({ type: 'start_augmentation', payload })
   }
