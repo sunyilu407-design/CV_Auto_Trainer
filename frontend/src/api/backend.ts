@@ -545,7 +545,7 @@ export const algorithmApi = {
     request<AlgorithmPlanRecord>('/algorithm/plan', {
       method: 'POST',
       body: JSON.stringify(payload),
-      timeout: 120000,
+      timeout: 180000,
     }),
   getPlan: (taskId: string) =>
     request<AlgorithmPlanRecord | null>(`/algorithm/plan/${taskId}`),

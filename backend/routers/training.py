@@ -501,6 +501,16 @@ def prepare_dataset(
         else base_dir / "labels"
     )
 
+    import logging as _logging
+    _log = _logging.getLogger("training.prepare_dataset")
+    _img_count = len(list(labeled_images_dir.iterdir())) if labeled_images_dir.exists() else -1
+    _lbl_count = len(list(labels_dir.glob("*.txt"))) if labels_dir.exists() else -1
+    _log.info(
+        "prepare_dataset: images_dir=%s (exists=%s, count=%d), labels_dir=%s (exists=%s, count=%d)",
+        labeled_images_dir, labeled_images_dir.exists(), _img_count,
+        labels_dir, labels_dir.exists(), _lbl_count,
+    )
+
     # 如果前端传了 override，视为增强目录（labeled_images_aug），
     # 此时 output_root 应在其父目录下建 dataset/ 子目录
     if payload.labeled_images_dir_override:

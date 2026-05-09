@@ -21,10 +21,10 @@ def build_pipeline(
     if enabled.get("geometric", True):
         transforms += [
             A.HorizontalFlip(p=0.5),
-            A.ShiftScaleRotate(
-                shift_limit=0.1,
-                scale_limit=0.3,
-                rotate_limit=15 if strength != "light" else 5,
+            A.Affine(
+                translate_percent={"x": (-0.1, 0.1), "y": (-0.1, 0.1)},
+                scale=(0.7, 1.3),
+                rotate=(-15, 15) if strength != "light" else (-5, 5),
                 border_mode=cv2.BORDER_CONSTANT,
                 p=0.5,
             ),
@@ -45,23 +45,25 @@ def build_pipeline(
 
     if enabled.get("noise", True) and strength != "light":
         transforms += [
-            A.GaussNoise(var_limit=(10.0, 50.0), p=0.3),
+            A.GaussNoise(std_range=(0.02, 0.1), p=0.3),
             A.MotionBlur(blur_limit=7, p=0.3),
-            A.ImageCompression(quality_lower=60, quality_upper=95, p=0.2),
+            A.ImageCompression(quality_range=(60, 95), p=0.2),
         ]
 
     if enabled.get("weather", False) and strength == "heavy":
         transforms += [
-            A.RandomRain(slant_lower=-10, slant_upper=10, drop_length=20, p=0.2),
-            A.RandomFog(fog_coef_lower=0.1, fog_coef_upper=0.3, p=0.15),
+            A.RandomRain(slant_range=(-10, 10), drop_length=20, p=0.2),
+            A.RandomFog(fog_coef_range=(0.1, 0.3), p=0.15),
             A.RandomSunFlare(flare_roi=(0, 0, 1, 0.5), p=0.1),
         ]
 
     if enabled.get("occlusion", False) and strength == "heavy":
         transforms.append(
             A.CoarseDropout(
-                max_holes=8, max_height=32, max_width=32,
-                fill_value=0, p=0.3,
+                num_holes_range=(1, 8),
+                hole_height_range=(16, 32),
+                hole_width_range=(16, 32),
+                fill=0, p=0.3,
             )
         )
 
@@ -101,9 +103,9 @@ def augment_dataset(
     # 复制原始数据（仅复制到增强目录，不覆盖原始目录）
     for img_path in src_images:
         label_path = Path(src_label_dir) / f"{img_path.stem}.txt"
-        shutil.copy(img_path, output_image_dir / img_path.name)
+        shutil.copy(img_path, Path(output_image_dir) / img_path.name)
         if label_path.exists():
-            shutil.copy(label_path, output_label_dir / label_path.name)
+            shutil.copy(label_path, Path(output_label_dir) / label_path.name)
 
     existing = len(src_images)
     needed = max(0, target_count - existing)
@@ -185,4 +187,4 @@ def _save_yolo_label(path: str, bboxes: list, labels: list):
     with open(path, "w", encoding="utf-8") as f:
         for label, bbox in zip(labels, bboxes):
             cx, cy, w, h = bbox
-            f.write(f"{label} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}\n")
+            f.write(f"{int(label)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}\n")

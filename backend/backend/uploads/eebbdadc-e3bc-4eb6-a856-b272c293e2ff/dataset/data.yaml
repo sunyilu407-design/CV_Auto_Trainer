@@ -1,0 +1,8 @@
+names:
+  0: person
+  1: car
+nc: 2
+path: /Users/ahs/work/CV_Auto_Trainer/CV_Auto_Trainer/backend/backend/uploads/eebbdadc-e3bc-4eb6-a856-b272c293e2ff/dataset
+test: images/test
+train: images/train
+val: images/val

@@ -10,6 +10,7 @@ from pipeline.gpu_manager import gpu_stage, check_cancel_and_yield, CancelError,
 from utils.image_files import list_image_files
 
 CLIP_CACHE_DISPLAY_PATH = "~/.cache/clip/ViT-B-32.pt"
+CLIP_HF_MODEL_ID = "openai/clip-vit-base-patch32"
 HF_CACHE_DISPLAY_PATH = "~/.cache/huggingface/hub"
 YOLO_WORLD_WEIGHT_NAME = "yolov8s-world.pt"
 MOONDREAM_MODEL_ID = "vikhyatk/moondream2"
@@ -180,6 +181,8 @@ def get_model_cache_status() -> dict:
     yolo_worker_path = WORKER_ROOT / YOLO_WORLD_WEIGHT_NAME
     yolo_cwd_path = Path.cwd() / YOLO_WORLD_WEIGHT_NAME
     clip_path = Path(CLIP_CACHE_DISPLAY_PATH).expanduser()
+    # YOLO-World uses HF transformers CLIP, not the OpenAI .pt file
+    clip_hf_dir = _get_hf_hub_cache_dir() / f"models--{CLIP_HF_MODEL_ID.replace('/', '--')}"
     moondream_dir = _get_hf_hub_cache_dir() / "models--vikhyatk--moondream2"
     moondream_summary = _path_summary(moondream_dir)
     moondream_details = _get_moondream_cache_details(moondream_dir)
@@ -192,9 +195,11 @@ def get_model_cache_status() -> dict:
             "installed": yolo_worker_path.exists() or yolo_cwd_path.exists(),
         },
         "clip": {
-            "model": "ViT-B-32.pt",
-            "cache": _path_summary(clip_path),
-            "installed": clip_path.exists(),
+            "model": CLIP_HF_MODEL_ID,
+            "cache": _path_summary(clip_hf_dir) if clip_hf_dir.exists() else _path_summary(clip_path),
+            "installed": clip_hf_dir.exists() or clip_path.exists(),
+            "hf_cache": _path_summary(clip_hf_dir),
+            "legacy_cache": _path_summary(clip_path),
         },
         "moondream": {
             "model": MOONDREAM_MODEL_ID,

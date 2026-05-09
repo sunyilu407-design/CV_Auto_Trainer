@@ -94,6 +94,7 @@ class NegotiationOrchestrator:
         sample_images_base64: Optional[List[str]] = None,
         initial_understanding: Optional[Dict[str, Any]] = None,
         user_description: Optional[str] = None,
+        is_init_signal: bool = False,
     ) -> OrchestratorResponse:
         """
         处理一轮对话。
@@ -110,14 +111,40 @@ class NegotiationOrchestrator:
         conv = self._get_or_create_conversation(task_id, conversation_id)
 
         # 判断是否首轮
-        is_first = len(conv.messages or []) == 0
+        existing_messages = conv.messages or []
+        is_first = len(existing_messages) == 0
         logger.info(
-            "handle_chat: task=%s, conv_id=%s, is_first=%s, msg_count=%d, "
+            "handle_chat: task=%s, conv_id=%s, is_first=%s, is_init=%s, msg_count=%d, "
             "has_initial=%s, user_desc=%s",
-            task_id, conv.id, is_first, len(conv.messages or []),
+            task_id, conv.id, is_first, is_init_signal, len(existing_messages),
             bool(initial_understanding),
             (user_description or "")[:60],
         )
+
+        # __INIT__ + 已有对话 + 有用户真实消息：恢复上次状态
+        has_user_messages = any(m.get("role") == "user" for m in existing_messages)
+        if is_init_signal and has_user_messages:
+            last_assistant = next(
+                (m for m in reversed(existing_messages) if m.get("role") == "assistant"),
+                None,
+            )
+            reply = last_assistant["content"] if last_assistant else "对话已恢复，请继续。"
+            logger.info("__INIT__ on existing conv (%d msgs, has user msgs): restoring", len(existing_messages))
+            return OrchestratorResponse(
+                conversation_id=conv.id,
+                reply=reply,
+                updated_config=conv.current_config,
+                should_preview=False,
+                converged=conv.confirmed or False,
+                missing=[],
+            )
+
+        # __INIT__ + 旧对话只有 AI 回复（无用户消息）：视为需要重新开始
+        if is_init_signal and len(existing_messages) > 0 and not has_user_messages:
+            logger.info("__INIT__ on stale conv (%d msgs, no user msgs): resetting to first turn", len(existing_messages))
+            conv.messages = []
+            existing_messages = []
+            is_first = True
 
         # 当前配置摘要
         config_summary = self._summarize_config(conv.current_config) if conv.current_config else None
@@ -199,7 +226,7 @@ class NegotiationOrchestrator:
 
         # 4. 更新对话历史（__INIT__ 信号不记录为用户消息）
         messages = list(conv.messages or [])
-        if message and message != "__INIT__":
+        if message and not is_init_signal:
             messages.append({
                 "role": "user",
                 "content": message,

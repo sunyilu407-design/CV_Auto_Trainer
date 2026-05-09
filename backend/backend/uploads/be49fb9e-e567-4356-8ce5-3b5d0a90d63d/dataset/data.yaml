@@ -1,0 +1,7 @@
+names:
+  0: wheel_chock
+nc: 1
+path: /Users/ahs/work/CV_Auto_Trainer/CV_Auto_Trainer/backend/backend/uploads/be49fb9e-e567-4356-8ce5-3b5d0a90d63d/dataset
+test: images/test
+train: images/train
+val: images/val

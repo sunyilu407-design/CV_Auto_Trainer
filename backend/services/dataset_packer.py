@@ -43,7 +43,7 @@ def split_dataset_stratified(
     def _dominant_class(lbl_path: Path) -> int:
         try:
             with open(lbl_path, encoding="utf-8") as f:
-                classes = [int(line.strip().split()[0]) for line in f if line.strip().split()]
+                classes = [int(float(line.strip().split()[0])) for line in f if line.strip().split()]
             return Counter(classes).most_common(1)[0][0] if classes else -1
         except (ValueError, IndexError, OSError):
             return -1
@@ -132,7 +132,10 @@ def compute_quality_report(
             "warnings": ["标注目录不存在"],
         }
 
+    # 支持平铺结构(labels/*.txt)和分割后结构(labels/train/*.txt, labels/val/*.txt, ...)
     label_files = list(label_path.glob("*.txt"))
+    if not label_files:
+        label_files = list(label_path.glob("**/*.txt"))
     total_boxes = 0
     class_counts: dict[int, int] = Counter()
     images_with_boxes = 0
@@ -147,7 +150,7 @@ def compute_quality_report(
                 total_boxes += len(boxes)
                 for parts in boxes:
                     try:
-                        class_counts[int(parts[0])] += 1
+                        class_counts[int(float(parts[0]))] += 1
                     except (ValueError, IndexError):
                         pass
         except OSError:

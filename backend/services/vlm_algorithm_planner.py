@@ -521,7 +521,11 @@ def _apply_reasoning_normalization(
         return plan
 
     # 只对真正会进入 YOLO-World 的检测目标做归一化（targets 已经是这一层）
-    result = normalize_categories(targets, adapter=adapter)
+    try:
+        result = normalize_categories(targets, adapter=adapter)
+    except Exception as exc:
+        logger.warning("Reasoning normalization failed (non-fatal, skipping): %s", exc)
+        return plan
     if not result or "items" not in result:
         return plan
 

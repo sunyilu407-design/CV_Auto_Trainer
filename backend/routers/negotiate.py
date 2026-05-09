@@ -150,6 +150,7 @@ def negotiate_chat(
         preview_stats=payload.preview_stats,
         initial_understanding=initial_understanding,
         user_description=getattr(task, "user_description", "") or "",
+        is_init_signal=(payload.message == "__INIT__"),
     )
 
     return {"code": 0, "msg": "ok", "data": result.to_dict()}

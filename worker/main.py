@@ -157,6 +157,15 @@ async def startup_model_status_check():
     await asyncio.to_thread(_refresh_model_status_only)
 
 
+async def _safe_ws_send(ws: WebSocket, data: dict) -> bool:
+    """Send JSON on WebSocket, return False if connection is already closed."""
+    try:
+        await ws.send_json(data)
+        return True
+    except (RuntimeError, WebSocketDisconnect):
+        return False
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
@@ -165,8 +174,11 @@ async def websocket_endpoint(ws: WebSocket):
             data = await ws.receive_json()
             try:
                 await _handle_command(ws, data)
+            except (RuntimeError, WebSocketDisconnect):
+                break
             except Exception as e:
-                await ws.send_json({"type": "error", "message": str(e)})
+                if not await _safe_ws_send(ws, {"type": "error", "message": str(e)}):
+                    break
     except WebSocketDisconnect:
         pass
 
@@ -188,7 +200,7 @@ async def _handle_command(ws: WebSocket, data: dict):
         resolved_output_image_dir = str(_resolve_path(payload["output_image_dir"]))
 
         def _send(msg: dict):
-            asyncio.run_coroutine_threadsafe(ws.send_json(msg), loop)
+            asyncio.run_coroutine_threadsafe(_safe_ws_send(ws, msg), loop)
 
         def make_progress(current, total, phase):
             _send(_build_gpu_info_msg())
@@ -320,8 +332,8 @@ async def _handle_command(ws: WebSocket, data: dict):
             }
 
         image_total = len(list_image_files(resolved_image_dir))
-        await ws.send_json(_build_gpu_info_msg())
-        await ws.send_json({
+        await _safe_ws_send(ws, _build_gpu_info_msg())
+        await _safe_ws_send(ws, {
             "type": "progress",
             "stage": "detection",
             "current": 0,
@@ -348,7 +360,7 @@ async def _handle_command(ws: WebSocket, data: dict):
             chosen_engine = engine_decision["engine"] if not use_existing else "existing_labels"
 
             if not use_existing:
-                await ws.send_json({
+                await _safe_ws_send(ws, {
                     "type": "progress",
                     "stage": "detection",
                     "current": 0,
@@ -390,7 +402,7 @@ async def _handle_command(ws: WebSocket, data: dict):
                     raw_boxes = await asyncio.to_thread(_run_gdino, full_classes)
                     engine_used = "grounding_dino"
                 else:
-                    await ws.send_json({
+                    await _safe_ws_send(ws, {
                         "type": "progress",
                         "stage": "detection",
                         "current": 0,
@@ -424,7 +436,7 @@ async def _handle_command(ws: WebSocket, data: dict):
                         raw_boxes = merge_raw_boxes(raw_boxes, remap_raw_boxes(sub_raw, weak_idx_map))
                         engine_used_parts.append("grounding_dino")
                     except Exception as gd_exc:
-                        await ws.send_json({
+                        await _safe_ws_send(ws, {
                             "type": "progress",
                             "stage": "detection",
                             "current": image_total,
@@ -433,7 +445,7 @@ async def _handle_command(ws: WebSocket, data: dict):
                             "message": f"Hybrid 模式下 Grounding DINO 调用失败：{gd_exc}",
                         })
                 elif weak_pairs:
-                    await ws.send_json({
+                    await _safe_ws_send(ws, {
                         "type": "progress",
                         "stage": "detection",
                         "current": 0,
@@ -462,7 +474,7 @@ async def _handle_command(ws: WebSocket, data: dict):
             ):
                 from pipeline.grounding_dino_detector import is_grounding_dino_available
                 if is_grounding_dino_available():
-                    await ws.send_json({
+                    await _safe_ws_send(ws, {
                         "type": "progress",
                         "stage": "detection",
                         "current": 0,
@@ -474,7 +486,7 @@ async def _handle_command(ws: WebSocket, data: dict):
                         raw_boxes = await asyncio.to_thread(_run_gdino, full_classes)
                         engine_used = "grounding_dino"
                     except Exception as gd_exc:
-                        await ws.send_json({
+                        await _safe_ws_send(ws, {
                             "type": "progress",
                             "stage": "detection",
                             "current": image_total,
@@ -488,13 +500,13 @@ async def _handle_command(ws: WebSocket, data: dict):
                 # 预标注数据：跳过 Moondream VQA 质检，直接使用已有标注
                 import json as _json
 
-                await ws.send_json(_build_gpu_info_msg())
+                await _safe_ws_send(ws, _build_gpu_info_msg())
 
                 with open(f"{resolved_output_raw_dir}/raw_boxes.json", encoding="utf-8") as _f:
                     passed = _json.load(_f)
 
                 # 发送质检跳过消息
-                await ws.send_json({
+                await _safe_ws_send(ws, {
                     "type": "progress",
                     "stage": "quality_check_skipped",
                     "current": image_total,
@@ -522,20 +534,20 @@ async def _handle_command(ws: WebSocket, data: dict):
                 raw_boxes, passed, use_existing, skip_quality_check, qc_stats, class_balance
             )
             result_payload["engine_used"] = engine_used
-            await ws.send_json({
+            await _safe_ws_send(ws, {
                 "type": "stage_complete",
                 "stage": "labeling",
                 "result": result_payload,
             })
         except CancelError:
-            await ws.send_json({"type": "cancel_ack", "cancelled": True, "stage": "labeling"})
+            await _safe_ws_send(ws, {"type": "cancel_ack", "cancelled": True, "stage": "labeling"})
 
     elif cmd == "start_augmentation":
         from pipeline.stage25_augmentor import augment_dataset
         from utils.image_files import list_image_files
 
         def _send(msg: dict):
-            asyncio.run_coroutine_threadsafe(ws.send_json(msg), loop)
+            asyncio.run_coroutine_threadsafe(_safe_ws_send(ws, msg), loop)
 
         def aug_progress(current, total, _phase):
             _send({
@@ -551,7 +563,7 @@ async def _handle_command(ws: WebSocket, data: dict):
         output_label_dir = _resolve_path(payload["output_label_dir"])
 
         if not list_image_files(src_image_dir):
-            await ws.send_json({
+            await _safe_ws_send(ws, {
                 "type": "error",
                 "stage": "augmentation",
                 "message": (
@@ -576,7 +588,7 @@ async def _handle_command(ws: WebSocket, data: dict):
             max_per_image=payload.get("max_per_image", 10),
         )
 
-        await ws.send_json({
+        await _safe_ws_send(ws, {
             "type": "stage_complete",
             "stage": "augmentation",
             "result": result,
@@ -593,7 +605,7 @@ async def _handle_command(ws: WebSocket, data: dict):
         trainer = LocalTrainer()
 
         def _send(msg: dict):
-            asyncio.run_coroutine_threadsafe(ws.send_json(msg), loop)
+            asyncio.run_coroutine_threadsafe(_safe_ws_send(ws, msg), loop)
 
         def training_progress_cb(status: dict):
             _send({
@@ -619,7 +631,7 @@ async def _handle_command(ws: WebSocket, data: dict):
                 progress_callback=training_progress_cb,
             )
 
-            await ws.send_json({
+            await _safe_ws_send(ws, {
                 "type": "training_complete",
                 "mode": "local",
                 "task_id": task_id,
@@ -638,7 +650,7 @@ async def _handle_command(ws: WebSocket, data: dict):
                 _notify_backend_complete(task_id, artifacts, train_config)
 
         except Exception as e:
-            await ws.send_json({
+            await _safe_ws_send(ws, {
                 "type": "training_error",
                 "message": str(e),
                 "recoverable": train_config.get("resume_last", False),
@@ -659,15 +671,15 @@ async def _handle_command(ws: WebSocket, data: dict):
         class_names = payload.get("class_names") or data.get("class_names", [])
 
         if not task_dir or not Path(task_dir).exists():
-            await ws.send_json({"type": "error", "message": f"Task directory not found: {task_dir}"})
+            await _safe_ws_send(ws, {"type": "error", "message": f"Task directory not found: {task_dir}"})
             return
 
         def _send_seed(msg: dict):
-            asyncio.run_coroutine_threadsafe(ws.send_json(msg), loop)
+            asyncio.run_coroutine_threadsafe(_safe_ws_send(ws, msg), loop)
 
         try:
             # Phase 1: Prepare dataset
-            await ws.send_json({"type": "seed_training_started"})
+            await _safe_ws_send(ws, {"type": "seed_training_started"})
             prep = await loop.run_in_executor(
                 None,
                 lambda: prepare_seed_dataset(task_dir, class_names),
@@ -687,7 +699,7 @@ async def _handle_command(ws: WebSocket, data: dict):
                 ),
             )
 
-            await ws.send_json({
+            await _safe_ws_send(ws, {
                 "type": "seed_training_complete",
                 "seed_model_path": result["seed_model_path"],
                 "best_map": result["best_map"],
@@ -714,7 +726,7 @@ async def _handle_command(ws: WebSocket, data: dict):
                 lambda: merge_seed_and_auto_labels(task_dir, class_names),
             )
 
-            await ws.send_json({
+            await _safe_ws_send(ws, {
                 "type": "seed_auto_label_complete",
                 "auto_accepted": auto_result["auto_accepted"],
                 "needs_review": auto_result["needs_review"],
@@ -724,14 +736,14 @@ async def _handle_command(ws: WebSocket, data: dict):
             })
 
         except Exception as e:
-            await ws.send_json({"type": "error", "message": f"Seed training failed: {str(e)}"})
+            await _safe_ws_send(ws, {"type": "error", "message": f"Seed training failed: {str(e)}"})
 
     elif cmd == "cancel":
         cancel_current_stage()
-        await ws.send_json({"type": "cancel_ack", "cancelled": True})
+        await _safe_ws_send(ws, {"type": "cancel_ack", "cancelled": True})
 
     elif cmd == "ping":
-        await ws.send_json({"type": "pong"})
+        await _safe_ws_send(ws, {"type": "pong"})
 
 
 def _notify_backend_complete(task_id: str, artifacts: dict, train_config: dict):
