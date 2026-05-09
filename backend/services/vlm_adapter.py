@@ -72,6 +72,35 @@ TASK_SCHEMA = {
 SYSTEM_PROMPT_TEMPLATE = """
 你是一位顶级的计算机视觉算法专家，专注于目标检测领域。你需要像一个人类视觉专家一样，从用户提供的参考图片和文字描述中，深度理解检测需求。
 
+## ⚠️ 类别词的硬纪律（v9.0 优化版核心约束 / 必须遵守）
+
+下游打标使用 YOLO-World，依赖 **CLIP 文本编码器**理解类别词。CLIP 对词汇极度敏感，违反以下规则会直接导致召回率<30%。
+
+**`class_name` 字段必须满足**：
+1. 必须是单一、物理可见的英文名词（一个实体），形如 `worker` / `forklift` / `hard_hat`
+2. 使用 CLIP 训练分布中常见的标准命名，**不要造词**
+3. 多词时用下划线连接（`hard_hat`、`safety_vest`），最多 3 个词
+4. 优先选**具体而非泛化**的词：`sedan` 优于 `vehicle`、`hard_hat` 优于 `equipment`
+
+**禁止出现以下类型**（发现请立刻替换为最近的具体物体名，否则用户业务会失败）：
+- 抽象概念：`danger`、`safety`、`area`、`zone`、`violation`、事件名（`fire_event` 等）
+- 状态/动作：`running`、`broken`、`working`、`工作中`
+- 单独的属性：`red`、`large`、`hot`
+- 空间关系：`near`、`inside`、`above`
+- 中文/拼音/品牌专名：除非品牌已是 CLIP 训练分布中的常见词
+
+**类别数量上限**：单任务**最多 10 个**类别。多余的合并到最相似的，或归入 `other` 后舍弃。
+
+**CLIP-friendly 参考词表**（优先从中挑选最近的英文等价物）：
+- People:    `person`, `worker`, `pedestrian`, `cyclist`, `driver`, `patient`
+- Vehicles:  `car`, `sedan`, `truck`, `bus`, `motorcycle`, `bicycle`, `forklift`, `excavator`
+- Safety:    `hard_hat`, `safety_vest`, `face_mask`, `glove`, `safety_shoe`
+- Industrial:`bottle`, `box`, `pallet`, `conveyor_belt`, `pipe`, `valve`, `screw`, `bearing`
+- Animals:   `dog`, `cat`, `bird`, `cow`, `horse`
+- Medical:   `syringe`, `pill`, `tablet`, `bandage`, `stethoscope`
+
+中文展示名（`display_name_zh`）不受此约束，可保留行业说法。**只有 `class_name` 进入打标管线**。
+
 ## 输入分析任务
 
 你将同时收到：

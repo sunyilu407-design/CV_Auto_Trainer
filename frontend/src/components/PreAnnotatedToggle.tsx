@@ -35,6 +35,12 @@ export default function PreAnnotatedToggle() {
       })
   }, [taskId])
 
+  useEffect(() => {
+    if (checkResult && !checkResult.has_annotations && skipLabeling) {
+      setSkipLabeling(false)
+    }
+  }, [checkResult, setSkipLabeling, skipLabeling])
+
   if (!taskId) return null
 
   if (checking) {
@@ -122,18 +128,23 @@ export default function PreAnnotatedToggle() {
 
             {/* Toggle */}
             <button
-              onClick={() => setSkipLabeling(!skipLabeling)}
+              onClick={() => {
+                if (!detected) return
+                setSkipLabeling(!skipLabeling)
+              }}
+              disabled={!detected}
               style={{
                 width: 44,
                 height: 24,
                 borderRadius: 12,
                 border: 'none',
                 background: skipLabeling ? '#10b981' : 'var(--gray-200)',
-                cursor: 'pointer',
+                cursor: detected ? 'pointer' : 'not-allowed',
                 padding: 2,
                 flexShrink: 0,
                 transition: 'background 0.2s ease',
                 position: 'relative',
+                opacity: detected ? 1 : 0.55,
               }}
             >
               <div

@@ -5,18 +5,19 @@ import AnnotationCanvas from '../components/AnnotationCanvas'
 
 export default function Upload() {
   const {
-    taskId,
     setTaskMeta,
     setStage,
     setVLMResult,
     setVLMStatus,
     setAlgorithmPlan,
+    resetNegotiation,
     sampleImages,
     datasetImages,
     sampleImageBoxes,
     setSampleImages,
     setDatasetImages,
     setSampleImageBoxes,
+    setLabelingImageDir,
     userDescription,
     setUserDescription,
     deviceProfileId,
@@ -91,16 +92,19 @@ export default function Upload() {
         height: result.video_info.height,
         frame_count: result.frame_count,
       })
+      if (datasetImages.length === 0) {
+        setLabelingImageDir(`../backend/uploads/${currentTaskId}/video_frames`)
+      }
     } finally {
       setVideoUploading(false)
     }
   }
 
-  const ensureTaskAndUploadDataset = async () => {
-    const currentTaskId = taskId || (await taskApi.create(`dataset-${new Date().toISOString()}`)).id
-    if (!taskId) {
-      setTaskMeta(currentTaskId, `dataset-${new Date().toISOString()}`)
-    }
+  const createTaskAndUploadDataset = async () => {
+    const taskName = `dataset-${new Date().toISOString()}`
+    const task = await taskApi.create(taskName)
+    const currentTaskId = task.id
+    setTaskMeta(currentTaskId, task.name || taskName)
 
     for (const file of datasetImages) {
       const formData = new FormData()
@@ -114,20 +118,31 @@ export default function Upload() {
       formData.append('file', file)
       await filesApi.upload(currentTaskId, formData, 'images')
     }
+    if (datasetImages.length > 0) {
+      setLabelingImageDir(`../backend/uploads/${currentTaskId}/images`)
+    }
 
     return currentTaskId
   }
 
   const handleParse = async () => {
-    if (datasetImages.length === 0 || !userDescription.trim()) {
+    if ((datasetImages.length === 0 && !videoFile) || !userDescription.trim()) {
       setError('请上传待处理图片并输入业务需求')
       return
     }
 
     setLoading(true)
     setError(null)
+    let taskReadyForTextFallback = false
 
     try {
+      setAlgorithmPlan(null)
+      const currentTaskId = await createTaskAndUploadDataset()
+      if (videoFile) {
+        await uploadVideoAndExtractFrames(currentTaskId)
+      }
+      taskReadyForTextFallback = true
+
       const imagesBase64 = await Promise.all(
         sampleImages.map((f) =>
           new Promise<string>((resolve, reject) => {
@@ -158,11 +173,6 @@ export default function Upload() {
           item.display_color_hint_zh == null ? (item.color_hint as string | null | undefined) ?? null : String(item.display_color_hint_zh),
       }))
 
-      const currentTaskId = await ensureTaskAndUploadDataset()
-      if (videoFile) {
-        await uploadVideoAndExtractFrames(currentTaskId)
-      }
-
       if (result.status === 'success') {
         setVLMResult({
           classes,
@@ -176,12 +186,19 @@ export default function Upload() {
         setError(result.message)
       }
 
-      setAlgorithmPlan(null)
+      // 清空旧的协商状态（后端已在 update_vlm_result 时清理 DB 对话）
+      resetNegotiation()
       setStage('intent_confirm')
     } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : '视觉解析失败'
       setVLMResult(null)
-      setVLMStatus('failed', e instanceof Error ? e.message : '视觉解析失败')
-      setError(e instanceof Error ? e.message : '解析失败')
+      setVLMStatus('failed', message)
+      if (taskReadyForTextFallback) {
+        resetNegotiation()
+        setStage('intent_confirm')
+      } else {
+        setError(message)
+      }
     } finally {
       setLoading(false)
     }

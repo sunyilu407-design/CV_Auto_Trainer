@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Float, JSON, DateTime, Boolean, Text
+from sqlalchemy import Column, String, Integer, Float, JSON, DateTime, Boolean, Text, ForeignKey
 from sqlalchemy.orm import DeclarativeBase
 import uuid as uuid_lib
 from datetime import datetime, timezone
@@ -91,6 +91,13 @@ class UserSettings(Base):
     vlm_top_p = Column(Float, default=0.7)
     vlm_stop = Column(String)  # JSON 数组字符串，如 "[\"###\"]"
 
+    # 推理模型（v9.0 P1-A 决策层）配置
+    reasoning_enabled = Column(Boolean, default=True)
+    reasoning_provider = Column(String, default="deepseek")  # deepseek | openai | kimi | qwen | zhipu | custom
+    reasoning_base_url = Column(String, default="https://api.deepseek.com/v1")
+    reasoning_api_key_encrypted = Column(String)
+    reasoning_model = Column(String, default="deepseek-reasoner")
+
     # 云端训练通用配置
     cloud_provider = Column(String, default="generic")
     ssh_host = Column(String)
@@ -109,3 +116,18 @@ class UserSettings(Base):
     default_delete_original = Column(Boolean, default=False)
     default_gpu_type = Column(String, default="RTX 4090")
     default_train_mode = Column(String, default="local")
+
+
+class NegotiationConversation(Base):
+    """多智能体需求确认对话记录"""
+    __tablename__ = "negotiation_conversations"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid_lib.uuid4()))
+    task_id = Column(String, ForeignKey("tasks.id"), nullable=False, index=True)
+    messages = Column(JSON, default=list)
+    current_config = Column(JSON)
+    algorithm_hints = Column(JSON)
+    confirmed = Column(Boolean, default=False)
+    preview_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

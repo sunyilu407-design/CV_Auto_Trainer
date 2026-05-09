@@ -3,6 +3,7 @@ import './styles/globals.css'
 import Upload from './pages/Upload'
 import IntentConfirm from './pages/IntentConfirm'
 import AlgorithmPlan from './pages/AlgorithmPlan'
+import EnvironmentPrep from './pages/EnvironmentPrep'
 import LabelingProgress from './pages/LabelingProgress'
 import AugmentConfig from './pages/AugmentConfig'
 import ReviewSamples from './pages/ReviewSamples'
@@ -11,6 +12,9 @@ import TrainConfig from './pages/TrainConfig'
 import TrainingMonitor from './pages/TrainingMonitor'
 import Delivery from './pages/Delivery'
 import VideoInferenceDemo from './pages/VideoInferenceDemo'
+import ManualAnnotation from './pages/ManualAnnotation'
+import SeedTraining from './pages/SeedTraining'
+import ReviewAutoLabels from './pages/ReviewAutoLabels'
 import SettingsPanel from './components/SettingsPanel'
 import Login from './pages/Login'
 import { useTaskStore, Stage } from './store/taskStore'
@@ -21,6 +25,10 @@ const WORKFLOW_STAGES: { key: Stage; label: string; accent: string }[] = [
   { key: 'upload', label: '需求录入', accent: '#0a72ef' },
   { key: 'intent_confirm', label: '需求协商', accent: '#0a72ef' },
   { key: 'algorithm_plan', label: '能力草案', accent: '#0a72ef' },
+  { key: 'environment', label: '环境准备', accent: '#0a72ef' },
+  { key: 'manual_annotation', label: '手动标注', accent: '#0a72ef' },
+  { key: 'seed_training', label: '种子训练', accent: '#0a72ef' },
+  { key: 'review_auto_labels', label: '标注审核', accent: '#f59e0b' },
   { key: 'labeling', label: '数据准备', accent: '#0a72ef' },
   { key: 'augment', label: '样本增强', accent: '#de1d8d' },
   { key: 'review', label: '质量复核', accent: '#de1d8d' },
@@ -245,6 +253,10 @@ function App() {
             {stage === 'upload' && <Upload />}
             {stage === 'intent_confirm' && <IntentConfirm />}
             {stage === 'algorithm_plan' && <AlgorithmPlan />}
+            {stage === 'environment' && <EnvironmentPrep />}
+            {stage === 'manual_annotation' && <ManualAnnotation />}
+            {stage === 'seed_training' && <SeedTraining />}
+            {stage === 'review_auto_labels' && <ReviewAutoLabels />}
             {stage === 'labeling' && <LabelingProgress />}
             {stage === 'augment' && <AugmentConfig />}
             {stage === 'review' && <ReviewSamples />}

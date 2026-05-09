@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTaskStore } from '../store/taskStore'
 import { filesApi, trainingApi, TrainingReport, taskApi, algorithmApi } from '../api/backend'
+import TrainingHistory from '../components/TrainingHistory'
 
 interface MultiModelArtifact {
   source: 'trained' | 'reuse' | 'failed'
@@ -21,7 +22,7 @@ const ROLE_LABELS: Record<string, string> = {
 }
 
 export default function Delivery() {
-  const { taskId, trainConfig, artifacts, reset } = useTaskStore()
+  const { taskId, trainConfig, artifacts, reset, setStage, setTrainConfig } = useTaskStore()
   const [packageReady, setPackageReady] = useState(false)
   const [packageLoading, setPackageLoading] = useState(false)
   const [artifactList, setArtifactList] = useState<Array<{ name: string; path: string; size: number }>>([])
@@ -44,6 +45,12 @@ export default function Delivery() {
       .then((s) => setMultiModelArtifacts(s.multi_model_artifacts ?? null))
       .catch(() => setMultiModelArtifacts(null))
   }, [taskId, packageReady])
+
+  // Auto-archive training version on delivery page mount
+  useEffect(() => {
+    if (!taskId) return
+    trainingApi.archiveVersion(taskId).catch(() => {})
+  }, [taskId])
 
   const availableArtifacts = useMemo(() => {
     const names = new Set<string>(Object.keys(artifacts))
@@ -370,8 +377,25 @@ export default function Delivery() {
         )}
       </div>
 
+      {/* Training History */}
+      <div style={{ marginBottom: 24 }}>
+        <TrainingHistory />
+      </div>
+
       {/* Actions */}
       <div className="flex gap-3" style={{ flexWrap: 'wrap' }}>
+        <button
+          className="btn btn-primary"
+          onClick={() => {
+            setTrainConfig({ incrementalMode: true, baseModelPath: null })
+            setStage('upload')
+          }}
+          style={{ padding: '10px 24px', fontWeight: 600, borderColor: '#f59e0b', background: '#f59e0b' }}
+          title="上传新的 badcase 图片，基于当前模型增量微调"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          追加数据 & 增量训练
+        </button>
         <button
           className="btn btn-primary"
           onClick={reset}

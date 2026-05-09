@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useSettingsStore, VlmProvider, VlmApiFormat } from '../store/settingsStore'
-import { vlmApi } from '../api/backend'
+import { useSettingsStore, VlmProvider, VlmApiFormat, ReasoningProvider } from '../store/settingsStore'
+import { vlmApi, reasoningApi } from '../api/backend'
 import ModelCacheTab from './ModelCacheTab'
 
 interface Props {
@@ -17,13 +17,24 @@ const PROVIDER_DEFAULTS: Record<VlmProvider, { baseUrl: string; apiFormat: VlmAp
   custom: { baseUrl: '', apiFormat: 'openai', model: '' },
 }
 
+const REASONING_PROVIDER_DEFAULTS: Record<ReasoningProvider, { baseUrl: string; model: string; label: string }> = {
+  deepseek: { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-reasoner', label: 'DeepSeek-R1（推荐 / 国内可达）' },
+  openai: { baseUrl: 'https://api.openai.com/v1', model: 'o3-mini', label: 'OpenAI o3-mini' },
+  kimi: { baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-thinking-preview', label: 'Kimi (k1.5 thinking)' },
+  qwen: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwq-plus', label: '通义千问 QwQ' },
+  zhipu: { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-zero-preview', label: '智谱 GLM-Zero' },
+  custom: { baseUrl: '', model: '', label: '自定义 / 中转代理' },
+}
+
 export default function SettingsPanel({ onClose }: Props) {
   const { settings, setSettings, saveSettings } = useSettingsStore()
-  const [activeTab, setActiveTab] = useState<'vlm' | 'cloud' | 'general' | 'cache'>('vlm')
+  const [activeTab, setActiveTab] = useState<'vlm' | 'reasoning' | 'cloud' | 'general' | 'cache'>('vlm')
   const [saving, setSaving] = useState(false)
   const [saveSuccessOpen, setSaveSuccessOpen] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [reasoningTesting, setReasoningTesting] = useState(false)
+  const [reasoningTestResult, setReasoningTestResult] = useState<{ success: boolean; message: string } | null>(null)
 
   const handleProviderChange = (provider: VlmProvider) => {
     const defaults = PROVIDER_DEFAULTS[provider]
@@ -56,6 +67,35 @@ export default function SettingsPanel({ onClose }: Props) {
     }
   }
 
+  const handleReasoningProviderChange = (provider: ReasoningProvider) => {
+    const defaults = REASONING_PROVIDER_DEFAULTS[provider]
+    setSettings({
+      reasoningProvider: provider,
+      reasoningBaseUrl: defaults.baseUrl,
+      reasoningModel: defaults.model,
+    })
+    setReasoningTestResult(null)
+  }
+
+  const handleReasoningTest = async () => {
+    setReasoningTesting(true)
+    setReasoningTestResult(null)
+    try {
+      const result = await reasoningApi.test({
+        provider: settings.reasoningProvider,
+        base_url: settings.reasoningBaseUrl,
+        api_key: settings.reasoningApiKey,
+        model: settings.reasoningModel,
+      })
+      setReasoningTestResult(result)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '测试失败'
+      setReasoningTestResult({ success: false, message: msg })
+    } finally {
+      setReasoningTesting(false)
+    }
+  }
+
   const handleSave = async () => {
     setSaving(true)
     try {
@@ -71,8 +111,9 @@ export default function SettingsPanel({ onClose }: Props) {
     }
   }
 
-  const tabs: { key: 'vlm' | 'cloud' | 'general' | 'cache'; label: string }[] = [
+  const tabs: { key: 'vlm' | 'reasoning' | 'cloud' | 'general' | 'cache'; label: string }[] = [
     { key: 'vlm', label: 'VLM' },
+    { key: 'reasoning', label: '推理模型' },
     { key: 'cloud', label: '云端训练' },
     { key: 'general', label: '全局' },
     { key: 'cache', label: '模型缓存' },
@@ -337,6 +378,174 @@ export default function SettingsPanel({ onClose }: Props) {
                       <>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ship-red)" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                         <span style={{ fontSize: 12, color: 'var(--ship-red)', fontWeight: 500 }}>{testResult.message}</span>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Reasoning Tab ── */}
+          {activeTab === 'reasoning' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  background: 'rgba(59,130,246,0.06)',
+                  border: '1px solid rgba(59,130,246,0.18)',
+                  fontSize: 12,
+                  lineHeight: 1.7,
+                  color: 'var(--gray-600)',
+                }}
+              >
+                <strong style={{ color: 'var(--develop-blue)' }}>推理模型用途：</strong>在「需求确认 → 算法方案」之间，对 VLM 给出的类别词做二次归一化，把抽象/状态词替换成 CLIP/YOLO-World 友好的英文物体词，显著提升首轮自动打标召回。未配置时主流程不受影响（会跳过这一步）。
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '12px 14px',
+                  background: 'var(--gray-50)',
+                  borderRadius: 8,
+                  border: '1px solid var(--gray-100)',
+                }}
+              >
+                <div>
+                  <p style={{ fontSize: 13, fontWeight: 500, margin: 0 }}>启用推理模型决策层</p>
+                  <p style={{ fontSize: 11, color: 'var(--gray-400)', margin: '2px 0 0' }}>关闭后类别归一化将完全跳过</p>
+                </div>
+                <label style={{ cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={settings.reasoningEnabled}
+                    onChange={(e) => setSettings({ reasoningEnabled: e.target.checked })}
+                    style={{ width: 0, height: 0, opacity: 0, position: 'absolute' }}
+                  />
+                  <div
+                    style={{
+                      width: 36,
+                      height: 20,
+                      borderRadius: 10,
+                      background: settings.reasoningEnabled ? 'var(--develop-blue)' : 'var(--gray-200)',
+                      position: 'relative',
+                      transition: 'all 0.2s ease',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: '50%',
+                        background: '#fff',
+                        position: 'absolute',
+                        top: 3,
+                        left: settings.reasoningEnabled ? 19 : 3,
+                        transition: 'left 0.2s ease',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
+                      }}
+                    />
+                  </div>
+                </label>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">推理模型 Provider</label>
+                <select
+                  className="input"
+                  value={settings.reasoningProvider}
+                  onChange={(e) => handleReasoningProviderChange(e.target.value as ReasoningProvider)}
+                  disabled={!settings.reasoningEnabled}
+                >
+                  {(Object.entries(REASONING_PROVIDER_DEFAULTS) as [ReasoningProvider, { label: string }][]).map(
+                    ([k, v]) => (
+                      <option key={k} value={k}>{v.label}</option>
+                    ),
+                  )}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">模型名称</label>
+                <input
+                  className="input"
+                  value={settings.reasoningModel}
+                  onChange={(e) => setSettings({ reasoningModel: e.target.value })}
+                  disabled={!settings.reasoningEnabled}
+                  placeholder="如 deepseek-reasoner / o3-mini"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Base URL</label>
+                <input
+                  className="input"
+                  value={settings.reasoningBaseUrl}
+                  onChange={(e) => setSettings({ reasoningBaseUrl: e.target.value })}
+                  disabled={!settings.reasoningEnabled}
+                  placeholder="https://api.deepseek.com/v1"
+                />
+                <p style={{ fontSize: 11, color: 'var(--gray-400)', margin: '4px 0 0' }}>
+                  须为 OpenAI 兼容的 chat/completions 端点（DeepSeek / OpenAI / Kimi / Qwen / 智谱 / 中转代理均可）
+                </p>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">API Key</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={settings.reasoningApiKey}
+                  onChange={(e) => setSettings({ reasoningApiKey: e.target.value })}
+                  disabled={!settings.reasoningEnabled}
+                  placeholder="sk-..."
+                />
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 12,
+                  alignItems: 'center',
+                  padding: '12px 14px',
+                  background: 'var(--gray-50)',
+                  borderRadius: 8,
+                  border: '1px solid var(--gray-100)',
+                }}
+              >
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleReasoningTest}
+                  disabled={reasoningTesting || !settings.reasoningEnabled || !settings.reasoningApiKey}
+                  style={{ flexShrink: 0 }}
+                >
+                  {reasoningTesting ? (
+                    <>
+                      <div className="spinner" />
+                      测试中...
+                    </>
+                  ) : (
+                    <>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                      测试连接
+                    </>
+                  )}
+                </button>
+                {reasoningTestResult && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {reasoningTestResult.success ? (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 500 }}>{reasoningTestResult.message}</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ship-red)" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <span style={{ fontSize: 12, color: 'var(--ship-red)', fontWeight: 500 }}>{reasoningTestResult.message}</span>
                       </>
                     )}
                   </div>

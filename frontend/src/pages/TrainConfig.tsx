@@ -136,11 +136,22 @@ export default function TrainConfig() {
     }
 
     // 预览模式：用少量数据快速验证效果
-    const effectiveConfig = trainConfig.previewMode ? {
+    let effectiveConfig = trainConfig.previewMode ? {
       ...trainConfig,
       epochs: trainConfig.previewMaxEpochs,
       imgsz: trainConfig.previewImgsz,
-    } : trainConfig
+    } : { ...trainConfig }
+
+    // 增量训练模式：使用 baseModelPath 和调整参数
+    if (trainConfig.incrementalMode && trainConfig.baseModelPath) {
+      effectiveConfig = {
+        ...effectiveConfig,
+        model: trainConfig.baseModelPath,
+        epochs: Math.min(effectiveConfig.epochs, 30),
+        lr0: Math.min(effectiveConfig.lr0, 0.005),
+        patience: Math.min(effectiveConfig.patience, 10),
+      }
+    }
 
     setStage('training')
     setTrainingProgress({
@@ -184,8 +195,11 @@ export default function TrainConfig() {
           setAppStage('train_config')
         }
       })
+      const datasetDir = trainConfig.incrementalMode
+        ? `../backend/uploads/${taskId}/incremental_dataset`
+        : `../backend/uploads/${taskId}/dataset`
       workerClient.startLocalTraining({
-        dataset_dir: `../backend/uploads/${taskId}/dataset`,
+        dataset_dir: datasetDir,
         train_config: effectiveConfig as unknown as Record<string, unknown>,
       })
     } else {
@@ -311,46 +325,83 @@ export default function TrainConfig() {
         </div>
       </div>
 
+      {/* Incremental Mode Banner */}
+      {trainConfig.incrementalMode && (
+        <div
+          style={{
+            padding: '12px 16px',
+            marginBottom: 16,
+            background: 'rgba(245,158,11,0.08)',
+            border: '1px solid rgba(245,158,11,0.3)',
+            borderRadius: 10,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          <span style={{ fontSize: 18 }}>⚡</span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#92400e' }}>增量训练模式</div>
+            <div style={{ fontSize: 12, color: '#a16207' }}>
+              基于上次训练的 best.pt 继续微调，自动降低学习率和 epoch 数
+              {trainConfig.baseModelPath && (
+                <span style={{ marginLeft: 8, fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+                  model: {trainConfig.baseModelPath.split('/').pop()}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Model Select */}
       <div className="card-section" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12 }}>
-          <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 0 }}>模型选择</h3>
-          <SourceBadge label={getSourceMeta('model', 'model').label} variant={getSourceMeta('model', 'model').variant} />
+          <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 0 }}>
+            {trainConfig.incrementalMode ? '模型 (增量模式已锁定)' : '模型选择'}
+          </h3>
+          {!trainConfig.incrementalMode && <SourceBadge label={getSourceMeta('model', 'model').label} variant={getSourceMeta('model', 'model').variant} />}
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
-          {MODELS.map((m) => {
-            const isActive = trainConfig.model === m.value
-            return (
-              <label
-                key={m.value}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '12px 8px',
-                  borderRadius: 8,
-                  border: `1.5px solid ${isActive ? 'var(--develop-blue)' : 'var(--gray-100)'}`,
-                  background: isActive ? 'rgba(10,114,239,0.05)' : 'var(--gray-50)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  textAlign: 'center',
-                }}
-              >
-                <input
-                  type="radio"
-                  name="model"
-                  value={m.value}
-                  checked={isActive}
-                  onChange={() => setTrainConfig({ model: m.value })}
-                  style={{ display: 'none' }}
-                />
-                <span style={{ fontSize: 13, fontWeight: 700, color: isActive ? 'var(--develop-blue)' : 'var(--gray-600)', letterSpacing: '-0.5px' }}>{m.label}</span>
-                <span style={{ fontSize: 10, color: 'var(--gray-400)' }}>{m.sub}</span>
-              </label>
-            )
-          })}
-        </div>
+        {trainConfig.incrementalMode ? (
+          <div style={{ padding: '12px 16px', background: 'var(--gray-50)', borderRadius: 8, fontSize: 13, color: 'var(--gray-600)' }}>
+            使用上次训练的 <strong>best.pt</strong> 作为基础模型（增量模式不可切换预训练模型）
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+            {MODELS.map((m) => {
+              const isActive = trainConfig.model === m.value
+              return (
+                <label
+                  key={m.value}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '12px 8px',
+                    borderRadius: 8,
+                    border: `1.5px solid ${isActive ? 'var(--develop-blue)' : 'var(--gray-100)'}`,
+                    background: isActive ? 'rgba(10,114,239,0.05)' : 'var(--gray-50)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    textAlign: 'center',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="model"
+                    value={m.value}
+                    checked={isActive}
+                    onChange={() => setTrainConfig({ model: m.value })}
+                    style={{ display: 'none' }}
+                  />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: isActive ? 'var(--develop-blue)' : 'var(--gray-600)', letterSpacing: '-0.5px' }}>{m.label}</span>
+                  <span style={{ fontSize: 10, color: 'var(--gray-400)' }}>{m.sub}</span>
+                </label>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Hyperparameters */}

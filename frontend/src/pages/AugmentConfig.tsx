@@ -5,7 +5,7 @@ import { trainingApi } from '../api/backend'
 import AugPreview from '../components/AugPreview'
 
 export default function AugmentConfig() {
-  const { taskId, vlmResult, augConfig, setAugConfig, setStage, setTotalImageCount, setSplitStats, setQualityReport, setWasAugmented } = useTaskStore()
+  const { taskId, vlmResult, augConfig, setAugConfig, setStage, setTotalImageCount, setSplitStats, setQualityReport, setWasAugmented, labeledImageCount } = useTaskStore()
   const [augmenting, setAugmenting] = useState(false)
   const [preparing, setPreparing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -47,6 +47,10 @@ export default function AugmentConfig() {
   const handleStartAug = () => {
     if (!taskId) {
       alert('缺少任务 ID，请重新从上传阶段开始')
+      return
+    }
+    if (labeledImageCount <= 0) {
+      setError('当前没有可用于增强的有效标注图片。请返回修改监测对象提示词/阈值，或上传已有 YOLO 标注后重新打标。')
       return
     }
 
@@ -114,6 +118,10 @@ export default function AugmentConfig() {
   }
 
   const handleSkipAndGoToReview = () => {
+    if (labeledImageCount <= 0) {
+      setError('当前没有可整理的数据集：标注图片数量为 0。请先完成至少 1 张有效图片标注。')
+      return
+    }
     setWasAugmented(false)
     prepareDatasetAndGoToReview({
       images: `../backend/uploads/${taskId}/labeled_images`,

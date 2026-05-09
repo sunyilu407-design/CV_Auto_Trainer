@@ -35,6 +35,12 @@ def get_settings_api(current_user: dict = Depends(require_auth), db: Session = D
             "vlm_temperature": settings.vlm_temperature or 0.7,
             "vlm_top_p": settings.vlm_top_p or 0.7,
             "vlm_stop": settings.vlm_stop or "",
+            "reasoning_enabled": bool(settings.reasoning_enabled) if settings.reasoning_enabled is not None else True,
+            "reasoning_provider": settings.reasoning_provider or "deepseek",
+            "reasoning_base_url": settings.reasoning_base_url or "https://api.deepseek.com/v1",
+            "reasoning_api_key": _mask_secret(decrypt_value(settings.reasoning_api_key_encrypted)) if settings.reasoning_api_key_encrypted else "",
+            "reasoning_api_key_set": bool(settings.reasoning_api_key_encrypted),
+            "reasoning_model": settings.reasoning_model or "deepseek-reasoner",
             "cloud_provider": settings.cloud_provider,
             "ssh_host": settings.ssh_host or "",
             "ssh_port": settings.ssh_port,
@@ -63,6 +69,11 @@ class SettingsUpdateRequest(BaseModel):
     vlm_temperature: Optional[float] = None
     vlm_top_p: Optional[float] = None
     vlm_stop: Optional[str] = None
+    reasoning_enabled: Optional[bool] = None
+    reasoning_provider: Optional[str] = None
+    reasoning_base_url: Optional[str] = None
+    reasoning_api_key: Optional[str] = None
+    reasoning_model: Optional[str] = None
     cloud_provider: Optional[str] = None
     ssh_host: Optional[str] = None
     ssh_port: Optional[int] = None
@@ -91,6 +102,10 @@ def update_settings(payload: SettingsUpdateRequest, current_user: dict = Depends
         raw = data.pop("vlm_api_key") or ""
         if raw and not _is_masked(raw):
             data["vlm_api_key_encrypted"] = encrypt_value(raw)
+    if "reasoning_api_key" in data:
+        raw = data.pop("reasoning_api_key") or ""
+        if raw and not _is_masked(raw):
+            data["reasoning_api_key_encrypted"] = encrypt_value(raw)
     if "ssh_password" in data:
         raw = data.pop("ssh_password") or ""
         if raw and not _is_masked(raw):

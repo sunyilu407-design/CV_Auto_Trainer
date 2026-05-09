@@ -19,6 +19,11 @@ from services.model_registry import (
     infer_device_tier,
     TrainedModelCache,
 )
+from services.reasoning_adapter import (
+    build_reasoning_adapter_from_settings,
+    get_reasoning_adapter,
+    normalize_categories,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +277,8 @@ def build_vlm_algorithm_plan(
     platform: str | None = None,
     device_description: str = "",
     image_count: int = 0,
+    reasoning_settings=None,
+    algorithm_hints: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     用 VLM 生成完整算法方案。
@@ -306,6 +313,15 @@ def build_vlm_algorithm_plan(
     )
     user_prompt = _build_user_prompt(user_description, vlm_result, image_count)
 
+    # 注入 algorithm_hints（来自需求确认对话）
+    if algorithm_hints:
+        import json as _json
+        hints_text = _json.dumps(algorithm_hints, ensure_ascii=False, indent=2)
+        user_prompt += (
+            "\n\n## 需求确认阶段产出的 algorithm_hints（请优先参考）\n"
+            f"```json\n{hints_text}\n```"
+        )
+
     # 调用 VLM
     try:
         raw = vlm_adapter.call_with_system_prompt(
@@ -318,6 +334,9 @@ def build_vlm_algorithm_plan(
     except Exception as e:
         logger.warning("VLM algorithm planning failed, falling back to rule-based: %s", e)
         plan = _fallback_rule_based_plan(user_description, vlm_result, device_tier, registry)
+
+    # P1-A 决策层：用推理模型对类别词做归一化（CLIP 友好度提升）
+    plan = _apply_reasoning_normalization(plan, vlm_adapter, reasoning_settings)
 
     # 查找可复用模型
     plan = _apply_cached_models(plan, registry)
@@ -351,6 +370,7 @@ def revise_vlm_algorithm_plan(
     existing_plan: Dict[str, Any],
     user_feedback: str,
     vlm_adapter,
+    reasoning_settings=None,
     revision_history: Optional[List[Dict[str, str]]] = None,
     gpu_type: str | None = None,
     platform: str | None = None,
@@ -446,6 +466,7 @@ def revise_vlm_algorithm_plan(
         plan["summary_zh"] = (plan.get("summary_zh") or plan.get("summary", "")) + f"\n[修订失败：{e}]"
         return plan
 
+    plan = _apply_reasoning_normalization(plan, vlm_adapter, reasoning_settings)
     plan = _apply_cached_models(plan, registry)
     if "negotiation_summary" not in plan or not plan["negotiation_summary"]:
         plan["negotiation_summary"] = _build_fallback_negotiation(plan, user_feedback)
@@ -471,6 +492,68 @@ def _parse_plan_response(raw: str) -> Dict[str, Any]:
         if key not in plan:
             raise ValueError(f"VLM response missing required key: {key}")
 
+    return plan
+
+
+def _apply_reasoning_normalization(
+    plan: Dict[str, Any],
+    vlm_adapter,
+    reasoning_settings=None,
+) -> Dict[str, Any]:
+    """
+    P1-A 决策层：用推理模型把 targets/classes 的类别词归一化为 CLIP/YOLO-World 友好的英文。
+    - 不可用（未配置 API Key 且无 fallback）→ 静默跳过，保留原 plan
+    - 输出附加到每个 target 的 reasoning_normalization 字段，并且如果有更优 prompt/aliases，写回 prompt + prompt_aliases
+    - 同时把 plan["reasoning_layer"] 置为后端名称，便于前端展示「已经过推理模型校验」徽章
+
+    reasoning_settings: 可选，含 reasoning_enabled/provider/base_url/api_key/model 的对象（来自用户 DB 设置）。
+    若为 None 则降级到 env-var 自动选择 + vlm_adapter。
+    """
+    targets = plan.get("targets", [])
+    if not targets:
+        return plan
+
+    if reasoning_settings is not None:
+        adapter = build_reasoning_adapter_from_settings(reasoning_settings, vlm_adapter)
+    else:
+        adapter = get_reasoning_adapter(vlm_adapter)
+    if adapter is None:
+        return plan
+
+    # 只对真正会进入 YOLO-World 的检测目标做归一化（targets 已经是这一层）
+    result = normalize_categories(targets, adapter=adapter)
+    if not result or "items" not in result:
+        return plan
+
+    # 合并归一化结果回 targets
+    items = {item.get("input_class_name"): item for item in result.get("items", []) if isinstance(item, dict)}
+    for t in targets:
+        item = items.get(t.get("class_name"))
+        if not item:
+            continue
+        normalized_name = (item.get("class_name_en") or "").strip()
+        aliases = [a.strip() for a in (item.get("aliases") or []) if isinstance(a, str) and a.strip()]
+        t["reasoning_normalization"] = {
+            "class_name_en": normalized_name,
+            "aliases": aliases,
+            "abstract": bool(item.get("abstract", False)),
+            "reasoning": item.get("reasoning", ""),
+            "provider": adapter.name,
+        }
+        # 仅在确信归一化结果合理时覆盖原 prompt（非空且非抽象词）
+        if normalized_name and not item.get("abstract", False):
+            t["prompt"] = normalized_name
+            existing_aliases = t.get("prompt_aliases") or []
+            merged: List[str] = []
+            seen = set()
+            for v in [normalized_name, *aliases, *existing_aliases]:
+                k = v.lower().strip()
+                if k and k not in seen:
+                    seen.add(k)
+                    merged.append(v)
+            t["prompt_aliases"] = merged
+
+    plan["reasoning_layer"] = adapter.name
     return plan
 
 

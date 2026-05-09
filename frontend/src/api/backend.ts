@@ -427,6 +427,107 @@ export const vlmApi = {
     }),
 }
 
+export const reasoningApi = {
+  test: (params: {
+    provider: string
+    base_url: string
+    api_key: string
+    model?: string
+  }) =>
+    request<{ success: boolean; message: string }>('/reasoning/test', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+  listProviders: () =>
+    request<Array<{ id: string; base_url: string; model: string; supports_json_format: boolean }>>(
+      '/reasoning/providers',
+      { method: 'GET' },
+    ),
+}
+
+// Negotiate APIs (需求确认对话)
+export interface NegotiateChatResponse {
+  conversation_id: string
+  reply: string
+  updated_config: {
+    classes: unknown[]
+    detection_rules: { conf_threshold: number; iou_threshold: number; post_filters: unknown[] }
+    vocab: Record<string, { primary: string; aliases: string[]; context_anchors: string[] }>
+    algorithm_hints: Record<string, unknown>
+  } | null
+  should_preview: boolean
+  convergence: {
+    converged: boolean
+    missing: string[]
+  }
+}
+
+export interface NegotiateConversationData {
+  conversation_id: string
+  messages: Array<{ role: string; content: string; timestamp: string; metadata?: Record<string, unknown> }>
+  current_config: Record<string, unknown> | null
+  algorithm_hints: Record<string, unknown> | null
+  confirmed: boolean
+  preview_count: number
+}
+
+export const negotiateApi = {
+  chat: (payload: {
+    task_id: string
+    message: string
+    conversation_id?: string | null
+    preview_stats?: { hits: number; false_positives: number; misses: number } | null
+    include_initial?: boolean
+  }) =>
+    request<NegotiateChatResponse>('/negotiate/chat', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeout: 210000,
+    }),
+
+  confirm: (taskId: string, conversationId: string) =>
+    request<{ finalized_config: Record<string, unknown>; algorithm_hints: Record<string, unknown> }>(
+      '/negotiate/confirm',
+      {
+        method: 'POST',
+        body: JSON.stringify({ task_id: taskId, conversation_id: conversationId }),
+      },
+    ),
+
+  getConversation: (taskId: string) =>
+    request<NegotiateConversationData | null>(`/negotiate/conversation/${taskId}`, {
+      method: 'GET',
+    }),
+
+  preview: (payload: {
+    task_id: string
+    conversation_id?: string
+    vocab?: Record<string, unknown>
+    detection_rules?: Record<string, unknown>
+    max_images?: number
+  }) =>
+    request<{
+      results: Array<{
+        image_name: string
+        image_base64: string
+        detections: Array<{ class_name: string; confidence: number; bbox: number[] }>
+        detection_count: number
+      }>
+      total_images: number
+      total_detections: number
+      conf_threshold: number
+    }>('/negotiate/preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeout: 60000,
+    }),
+
+  reset: (taskId: string) =>
+    request<{ deleted: number }>(`/negotiate/reset/${taskId}`, {
+      method: 'DELETE',
+    }),
+}
+
 export const algorithmApi = {
   generatePlan: (payload: {
     task_id: string
@@ -439,6 +540,7 @@ export const algorithmApi = {
     device_description?: string
     image_count?: number
     use_vlm_planner?: boolean
+    algorithm_hints?: Record<string, unknown> | null
   }) =>
     request<AlgorithmPlanRecord>('/algorithm/plan', {
       method: 'POST',
@@ -446,7 +548,7 @@ export const algorithmApi = {
       timeout: 120000,
     }),
   getPlan: (taskId: string) =>
-    request<AlgorithmPlanRecord>(`/algorithm/plan/${taskId}`),
+    request<AlgorithmPlanRecord | null>(`/algorithm/plan/${taskId}`),
   negotiatePlan: (
     taskId: string,
     payload: {
@@ -726,6 +828,51 @@ export const trainingApi = {
       method: 'POST',
       body: JSON.stringify(params),
     }),
+  startIncremental: (taskId: string, payload: { auto_label_new?: boolean; class_names?: string[] }) =>
+    request<IncrementalResult>(`/training/${taskId}/incremental`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeout: 120000,
+    }),
+  getTrainingHistory: (taskId: string) =>
+    request<TrainingVersionEntry[]>(`/training/${taskId}/training-history`),
+  archiveVersion: (taskId: string) =>
+    request<{ version: number; archive_path: string }>(`/training/${taskId}/archive-version`, {
+      method: 'POST',
+    }),
+}
+
+export interface IncrementalResult {
+  merged_dataset_dir: string
+  data_yaml: string
+  total_images: number
+  old_images: number
+  new_images: number
+  duplicates_removed: number
+  auto_labeled: number
+  train_count: number
+  val_count: number
+  base_model_path: string
+  current_version: number
+  next_version: number
+  recommended_config: {
+    model: string
+    epochs: number
+    lr0: number
+    patience: number
+    imgsz: number
+    batch: number
+  }
+}
+
+export interface TrainingVersionEntry {
+  version: number
+  images?: number
+  map50?: number
+  classes?: number
+  new_images?: number
+  archived_at?: string
+  has_model?: boolean
 }
 
 export interface AutoDLRecoveryInfo {
@@ -833,6 +980,27 @@ export const filesApi = {
       detected_classes: number[]
       message: string
     }>(`/files/${taskId}/check-annotations?subdir=${encodeURIComponent(subdir)}`),
+  saveSeedAnnotation: (taskId: string, imageName: string, boxes: Array<{ class_index: number; cx: number; cy: number; w: number; h: number }>) =>
+    request<{ saved: number }>(`/files/${taskId}/seed-annotations`, {
+      method: 'POST',
+      body: JSON.stringify({ image_name: imageName, boxes }),
+    }),
+  getSeedAnnotations: (taskId: string) =>
+    request<{
+      annotations: Record<string, Array<{ class_index: number; cx: number; cy: number; w: number; h: number }>>
+      annotated_count: number
+      total_count: number
+    }>(`/files/${taskId}/seed-annotations`),
+  deleteSeedAnnotation: (taskId: string, imageName: string) =>
+    request<void>(`/files/${taskId}/seed-annotations/${encodeURIComponent(imageName)}`, { method: 'DELETE' }),
+  listDatasetImages: (taskId: string, page: number = 1, size: number = 50) =>
+    request<{
+      images: Array<{ name: string; has_annotation: boolean }>
+      total: number
+      annotated: number
+      page: number
+      size: number
+    }>(`/files/${taskId}/dataset-images?page=${page}&size=${size}`),
 }
 
 export interface VideoInferenceFrame {

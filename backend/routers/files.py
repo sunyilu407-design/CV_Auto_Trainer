@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 import shutil
+import json
 from pathlib import Path
 from typing import Optional
 from models.database import get_db
@@ -271,3 +273,258 @@ def download_artifact(task_id: str, filename: str, current_user: dict = Depends(
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(path=file_path, filename=filename)
+
+
+@router.get("/{task_id}/image/{image_name}")
+def serve_dataset_image(
+    task_id: str,
+    image_name: str,
+    token: Optional[str] = None,
+    current_user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    task = get_task_for_user(db, task_id, current_user)
+    safe_name = _safe_filename(image_name)
+    for subdir_name in ["images", "video_frames"]:
+        candidate = UPLOAD_DIR / task_id / subdir_name / safe_name
+        if candidate.exists():
+            _ensure_within(UPLOAD_DIR / task_id, candidate)
+            return FileResponse(path=candidate)
+    raise HTTPException(status_code=404, detail="Image not found")
+
+
+# ── Seed Annotations (Snowball Labeling) ──
+
+IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff"}
+
+
+class SeedAnnotationBox(BaseModel):
+    class_index: int
+    cx: float
+    cy: float
+    w: float
+    h: float
+
+
+class SaveSeedAnnotationRequest(BaseModel):
+    image_name: str
+    boxes: list[SeedAnnotationBox]
+
+
+@router.post("/{task_id}/seed-annotations")
+def save_seed_annotation(
+    task_id: str,
+    payload: SaveSeedAnnotationRequest,
+    current_user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    task = get_task_for_user(db, task_id, current_user)
+
+    seed_dir = UPLOAD_DIR / task_id / "seed_labels"
+    seed_dir.mkdir(exist_ok=True, parents=True)
+
+    stem = Path(_safe_filename(payload.image_name)).stem
+    label_path = _ensure_within(seed_dir, seed_dir / f"{stem}.txt")
+
+    if not payload.boxes:
+        label_path.unlink(missing_ok=True)
+    else:
+        with open(label_path, "w", encoding="utf-8") as f:
+            for box in payload.boxes:
+                f.write(f"{box.class_index} {box.cx:.6f} {box.cy:.6f} {box.w:.6f} {box.h:.6f}\n")
+
+    return {"code": 0, "msg": "ok", "data": {"saved": len(payload.boxes)}}
+
+
+@router.get("/{task_id}/seed-annotations")
+def get_seed_annotations(
+    task_id: str,
+    current_user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    task = get_task_for_user(db, task_id, current_user)
+
+    seed_dir = UPLOAD_DIR / task_id / "seed_labels"
+    annotations: dict[str, list[dict]] = {}
+    annotated_count = 0
+
+    if seed_dir.exists():
+        for txt_file in sorted(seed_dir.glob("*.txt")):
+            boxes = []
+            with open(txt_file, encoding="utf-8") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) == 5:
+                        boxes.append({
+                            "class_index": int(parts[0]),
+                            "cx": float(parts[1]),
+                            "cy": float(parts[2]),
+                            "w": float(parts[3]),
+                            "h": float(parts[4]),
+                        })
+            if boxes:
+                annotations[txt_file.stem] = boxes
+                annotated_count += 1
+
+    # Count total dataset images
+    total_count = 0
+    for subdir_name in ["images", "video_frames"]:
+        img_dir = UPLOAD_DIR / task_id / subdir_name
+        if img_dir.exists():
+            total_count += sum(
+                1 for p in img_dir.iterdir()
+                if p.is_file() and p.suffix.lower() in IMG_EXTS
+            )
+
+    return {
+        "code": 0, "msg": "ok",
+        "data": {
+            "annotations": annotations,
+            "annotated_count": annotated_count,
+            "total_count": total_count,
+        },
+    }
+
+
+@router.delete("/{task_id}/seed-annotations/{image_name}")
+def delete_seed_annotation(
+    task_id: str,
+    image_name: str,
+    current_user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    task = get_task_for_user(db, task_id, current_user)
+
+    seed_dir = UPLOAD_DIR / task_id / "seed_labels"
+    stem = Path(_safe_filename(image_name)).stem
+    label_path = seed_dir / f"{stem}.txt"
+    if label_path.exists():
+        _ensure_within(seed_dir, label_path)
+        label_path.unlink()
+
+    return {"code": 0, "msg": "ok"}
+
+
+@router.get("/{task_id}/dataset-images")
+def list_dataset_images(
+    task_id: str,
+    page: int = 1,
+    size: int = 50,
+    current_user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    task = get_task_for_user(db, task_id, current_user)
+
+    # Collect images from both possible directories
+    all_images: list[str] = []
+    for subdir_name in ["images", "video_frames"]:
+        img_dir = UPLOAD_DIR / task_id / subdir_name
+        if img_dir.exists():
+            all_images.extend(
+                p.name for p in sorted(img_dir.iterdir(), key=lambda p: p.name.lower())
+                if p.is_file() and p.suffix.lower() in IMG_EXTS
+            )
+
+    # Deduplicate preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for name in all_images:
+        if name not in seen:
+            seen.add(name)
+            unique.append(name)
+    all_images = unique
+
+    # Check which ones have seed annotations
+    seed_dir = UPLOAD_DIR / task_id / "seed_labels"
+    annotated_stems: set[str] = set()
+    if seed_dir.exists():
+        annotated_stems = {p.stem for p in seed_dir.glob("*.txt") if p.stat().st_size > 0}
+
+    total = len(all_images)
+    start = (page - 1) * size
+    page_images = all_images[start:start + size]
+
+    items = []
+    for name in page_images:
+        stem = Path(name).stem
+        items.append({
+            "name": name,
+            "has_annotation": stem in annotated_stems,
+        })
+
+    return {
+        "code": 0, "msg": "ok",
+        "data": {
+            "images": items,
+            "total": total,
+            "annotated": len(annotated_stems),
+            "page": page,
+            "size": size,
+        },
+    }
+
+
+# ── Review Labels (低置信框审核) ──
+
+@router.get("/{task_id}/review-labels")
+def list_review_labels(
+    task_id: str,
+    current_user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """列出 review_labels/ 目录中有待审核标注的图片名"""
+    task = get_task_for_user(db, task_id, current_user)
+    review_dir = UPLOAD_DIR / task_id / "review_labels"
+    if not review_dir.exists():
+        return {"code": 0, "msg": "ok", "data": []}
+
+    # Find image names that correspond to review labels
+    image_dir = None
+    for sub in ["images", "video_frames"]:
+        candidate = UPLOAD_DIR / task_id / sub
+        if candidate.exists():
+            image_dir = candidate
+            break
+
+    if image_dir is None:
+        return {"code": 0, "msg": "ok", "data": []}
+
+    names = []
+    for lbl in sorted(review_dir.iterdir()):
+        if not lbl.is_file() or lbl.suffix != ".txt" or lbl.stat().st_size == 0:
+            continue
+        stem = lbl.stem
+        for ext in [".jpg", ".jpeg", ".png", ".bmp", ".webp"]:
+            img_path = image_dir / f"{stem}{ext}"
+            if img_path.exists():
+                names.append(img_path.name)
+                break
+
+    return {"code": 0, "msg": "ok", "data": names}
+
+
+@router.get("/{task_id}/review-labels/{image_stem}")
+def get_review_label(
+    task_id: str,
+    image_stem: str,
+    current_user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """获取单张图片的待审核标注 (YOLO 格式)"""
+    task = get_task_for_user(db, task_id, current_user)
+    safe_stem = _safe_filename(image_stem.replace(".txt", ""))
+    label_path = UPLOAD_DIR / task_id / "review_labels" / f"{safe_stem}.txt"
+
+    if not label_path.exists():
+        return {"code": 0, "msg": "ok", "data": []}
+
+    _ensure_within(UPLOAD_DIR / task_id, label_path)
+
+    boxes = []
+    for line in label_path.read_text().strip().splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 5:
+            cls, cx, cy, w, h = int(parts[0]), float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
+            boxes.append({"cls": cls, "cx": cx, "cy": cy, "w": w, "h": h})
+
+    return {"code": 0, "msg": "ok", "data": boxes}

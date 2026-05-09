@@ -26,6 +26,108 @@ export interface WorkerMessage {
   [key: string]: unknown
 }
 
+export interface ModelPathSummary {
+  path: string
+  exists: boolean
+  size_bytes: number
+  file_count: number
+}
+
+export interface ModelPrepState {
+  running: boolean
+  include_moondream: boolean
+  steps: Record<string, { status: string; message: string }>
+  error: string | null
+  status: {
+    yolo_world: {
+      model: string
+      selected_path: string
+      worker_path: ModelPathSummary
+      cwd_path: ModelPathSummary
+      installed: boolean
+    }
+    clip: {
+      model: string
+      cache: ModelPathSummary
+      installed: boolean
+    }
+    moondream: {
+      model: string
+      cache: ModelPathSummary
+      installed: boolean
+      incomplete_files: string[]
+      complete_snapshots?: string[]
+      snapshot_count?: number
+    }
+  } | null
+}
+
+export async function fetchModelStatus() {
+  const res = await fetch(`${WORKER_HTTP_BASE}/model-status`)
+  if (!res.ok) throw new Error('读取模型状态失败')
+  return res.json() as Promise<ModelPrepState>
+}
+
+export async function prepareModels(includeMoondream: boolean) {
+  const res = await fetch(`${WORKER_HTTP_BASE}/prepare-models`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ include_moondream: includeMoondream }),
+  })
+  if (!res.ok) throw new Error('启动模型准备失败')
+  return res.json() as Promise<ModelPrepState>
+}
+
+export interface DetectionPreviewClass {
+  class_name: string
+  prompt: string
+  prompt_aliases?: string[]
+  negative_prompt?: string
+  color_hint?: string | null
+}
+
+export interface DetectionPreviewResult {
+  total_images: number
+  raw_box_count: number
+  accepted_box_count?: number
+  candidate_box_count?: number
+  diagnostic_conf_threshold?: number
+  accepted_conf_threshold?: number
+  imgsz?: number
+  prompts_used?: string[]
+  suggestions?: string[]
+  message: string
+  results: Array<{
+    image_name: string
+    image_base64: string
+    detections: Array<{
+      class_name: string
+      prompt: string
+      confidence: number
+      accepted?: boolean
+      bbox_xywhn: number[]
+    }>
+  }>
+}
+
+export async function previewYoloWorldDetection(payload: {
+  image_dir: string
+  classes: DetectionPreviewClass[]
+  max_images?: number
+  conf_threshold?: number
+  diagnostic_conf_threshold?: number
+  iou_threshold?: number
+  imgsz?: number
+}) {
+  const res = await fetch(`${WORKER_HTTP_BASE}/detection-preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error('YOLO-World 预览失败')
+  return res.json() as Promise<DetectionPreviewResult>
+}
+
 type MessageHandler = (msg: WorkerMessage) => void
 
 class WorkerClient {
@@ -58,8 +160,8 @@ class WorkerClient {
     this.ws.onmessage = (event) => {
       try {
         const msg: WorkerMessage = JSON.parse(event.data)
+        this.lastPong = Date.now()
         if (msg.type === 'pong') {
-          this.lastPong = Date.now()
           return
         }
         this.handlers.forEach((h) => h(msg))
@@ -133,6 +235,7 @@ class WorkerClient {
     classes: Array<{
       class_name: string
       prompt: string
+      prompt_aliases?: string[]
       negative_prompt?: string
       color_hint?: string | null
     }>
@@ -141,9 +244,11 @@ class WorkerClient {
     output_image_dir: string
     conf_threshold?: number
     iou_threshold?: number
+    imgsz?: number
     batch_size?: number
     qa_threshold?: number
     use_existing_labels?: boolean
+    skip_quality_check?: boolean
   }) {
     this.send({ type: 'start_detection', payload })
   }

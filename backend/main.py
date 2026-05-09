@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-from routers import tasks, vlm, settings, training, files, auth, algorithm, models as models_router
+from routers import tasks, vlm, settings, training, files, auth, algorithm, models as models_router, reasoning, negotiate
 from models.database import SessionLocal
 from routers.auth import seed_admin_user
 
@@ -94,6 +94,8 @@ app.include_router(training.router)
 app.include_router(files.router)
 app.include_router(auth.router)
 app.include_router(models_router.router)
+app.include_router(reasoning.router)
+app.include_router(negotiate.router)
 
 
 @app.get("/api/health")

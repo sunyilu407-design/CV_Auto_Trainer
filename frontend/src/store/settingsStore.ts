@@ -4,6 +4,7 @@ import { useAuthStore } from './authStore'
 export type CloudProvider = 'generic' | 'autodl'
 export type VlmProvider = 'openai' | 'kimi' | 'minimax' | 'zhipu' | 'gemini' | 'claude' | 'custom'
 export type VlmApiFormat = 'openai' | 'anthropic' | 'gemini'
+export type ReasoningProvider = 'deepseek' | 'openai' | 'kimi' | 'qwen' | 'zhipu' | 'custom'
 
 export interface UserSettings {
   vlmProvider: VlmProvider
@@ -11,6 +12,12 @@ export interface UserSettings {
   vlmApiKey: string
   vlmApiFormat: VlmApiFormat
   vlmModel: string
+
+  reasoningEnabled: boolean
+  reasoningProvider: ReasoningProvider
+  reasoningBaseUrl: string
+  reasoningApiKey: string
+  reasoningModel: string
 
   cloudProvider: CloudProvider
 
@@ -45,6 +52,11 @@ const snakeToCamel: Record<string, string> = {
   vlm_api_key: 'vlmApiKey',
   vlm_api_format: 'vlmApiFormat',
   vlm_model: 'vlmModel',
+  reasoning_enabled: 'reasoningEnabled',
+  reasoning_provider: 'reasoningProvider',
+  reasoning_base_url: 'reasoningBaseUrl',
+  reasoning_api_key: 'reasoningApiKey',
+  reasoning_model: 'reasoningModel',
   cloud_provider: 'cloudProvider',
   ssh_host: 'sshHost',
   ssh_port: 'sshPort',
@@ -82,6 +94,12 @@ const defaultSettings: UserSettings = {
   vlmApiKey: '',
   vlmApiFormat: 'openai',
   vlmModel: '',
+
+  reasoningEnabled: true,
+  reasoningProvider: 'deepseek',
+  reasoningBaseUrl: 'https://api.deepseek.com/v1',
+  reasoningApiKey: '',
+  reasoningModel: 'deepseek-reasoner',
 
   cloudProvider: 'generic',
   sshHost: '',

@@ -1043,3 +1043,204 @@ def cancel_training(task_id: str, current_user: dict = Depends(require_auth), db
     task.status = "cancelled"
     db.commit()
     return {"code": 0, "msg": "ok", "data": None}
+
+
+# ── Incremental Training (增量训练) ──
+
+class IncrementalTrainingRequest(BaseModel):
+    auto_label_new: bool = True
+    class_names: list[str] = []
+
+
+@router.post("/{task_id}/incremental")
+def start_incremental_training(
+    task_id: str,
+    payload: IncrementalTrainingRequest,
+    current_user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """
+    增量训练入口:
+    1. 获取新上传的图片 (incremental_images/)
+    2. 合并旧数据 + 新数据
+    3. 返回合并统计 + 推荐训练参数
+    """
+    import sys
+    sys.path.insert(0, str(_PROJECT_ROOT / "worker"))
+
+    from utils.incremental_merger import (
+        merge_incremental_data,
+        prepare_incremental_dataset,
+        get_latest_model_path,
+        get_latest_version,
+    )
+
+    task = get_task_for_user(db, task_id, current_user)
+
+    upload_root = Path("./uploads")
+    task_dir = upload_root / task_id
+
+    # New images uploaded via standard upload endpoint to incremental_images/
+    new_image_dir = task_dir / "incremental_images"
+    new_label_dir = task_dir / "incremental_labels"
+
+    if not new_image_dir.exists() or not any(new_image_dir.iterdir()):
+        raise HTTPException(status_code=400, detail="未找到新增图片，请先上传增量数据")
+
+    # Find base model
+    base_model_path = get_latest_model_path(str(task_dir))
+    if not base_model_path:
+        # Fallback: check default training output
+        fallback = task_dir / "local_training_output" / "exp" / "weights" / "best.pt"
+        if fallback.exists():
+            base_model_path = str(fallback)
+        else:
+            raise HTTPException(status_code=400, detail="未找到已训练的模型，请先完成首次训练")
+
+    # Merge data
+    merge_result = merge_incremental_data(
+        task_dir=str(task_dir),
+        new_image_dir=str(new_image_dir),
+        new_label_dir=str(new_label_dir) if new_label_dir.exists() else None,
+        base_model_path=base_model_path,
+        auto_label_new=payload.auto_label_new,
+        class_names=payload.class_names,
+    )
+
+    # Prepare split dataset
+    class_names = payload.class_names
+    if not class_names:
+        # Try to get from algorithm plan
+        plan = task.algorithm_plan or {}
+        class_names = [t.get("class_name", f"class_{i}") for i, t in enumerate(plan.get("targets", []))]
+
+    prep = prepare_incremental_dataset(
+        task_dir=str(task_dir),
+        class_names=class_names,
+        merged_image_dir=merge_result["merged_image_dir"],
+        merged_label_dir=merge_result["merged_label_dir"],
+    )
+
+    current_version = get_latest_version(str(task_dir))
+    next_version = current_version + 1
+
+    # Recommended incremental training params
+    recommended = {
+        "model": base_model_path,
+        "epochs": 30,
+        "lr0": 0.005,
+        "patience": 10,
+        "imgsz": 640,
+        "batch": 16,
+    }
+
+    return {
+        "code": 0, "msg": "ok",
+        "data": {
+            "merged_dataset_dir": prep["dataset_dir"],
+            "data_yaml": prep["data_yaml"],
+            "total_images": merge_result["total_images"],
+            "old_images": merge_result["old_images"],
+            "new_images": merge_result["new_images"],
+            "duplicates_removed": merge_result["duplicates_removed"],
+            "auto_labeled": merge_result["auto_labeled"],
+            "train_count": prep["train_count"],
+            "val_count": prep["val_count"],
+            "base_model_path": base_model_path,
+            "current_version": current_version,
+            "next_version": next_version,
+            "recommended_config": recommended,
+        },
+    }
+
+
+@router.get("/{task_id}/training-history")
+def get_training_history_endpoint(
+    task_id: str,
+    current_user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """获取训练版本历史"""
+    import sys
+    sys.path.insert(0, str(_PROJECT_ROOT / "worker"))
+
+    from utils.incremental_merger import get_training_history
+
+    task = get_task_for_user(db, task_id, current_user)
+
+    upload_root = Path("./uploads")
+    task_dir = upload_root / task_id
+    history = get_training_history(str(task_dir))
+
+    return {"code": 0, "msg": "ok", "data": history}
+
+
+@router.post("/{task_id}/archive-version")
+def archive_training_version_endpoint(
+    task_id: str,
+    current_user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """
+    将当前训练结果归档为新版本。
+    在训练完成后自动调用。
+    """
+    import sys
+    sys.path.insert(0, str(_PROJECT_ROOT / "worker"))
+
+    from utils.incremental_merger import archive_training_version, get_latest_version
+
+    task = get_task_for_user(db, task_id, current_user)
+
+    upload_root = Path("./uploads")
+    task_dir = upload_root / task_id
+
+    # Find best.pt
+    best_pt = task_dir / "local_training_output" / "exp" / "weights" / "best.pt"
+    if not best_pt.exists():
+        best_pt = task_dir / "seed_training_output" / "exp" / "weights" / "best.pt"
+    if not best_pt.exists():
+        raise HTTPException(status_code=400, detail="未找到训练权重文件")
+
+    # Find data.yaml
+    data_yaml = task_dir / "incremental_dataset" / "data.yaml"
+    if not data_yaml.exists():
+        data_yaml = task_dir / "seed_dataset" / "data.yaml"
+    if not data_yaml.exists():
+        # Look in augmented dataset
+        for candidate in [
+            task_dir / "augmented_dataset" / "data.yaml",
+            task_dir / "final_dataset" / "data.yaml",
+        ]:
+            if candidate.exists():
+                data_yaml = candidate
+                break
+
+    next_version = get_latest_version(str(task_dir)) + 1
+
+    # Build stats
+    progress = task.training_progress or {}
+    # Count new images if this was incremental
+    new_image_count = 0
+    incr_img_dir = task_dir / "incremental_images"
+    if incr_img_dir.exists():
+        new_image_count = sum(1 for f in incr_img_dir.iterdir() if f.is_file())
+    stats = {
+        "images": progress.get("total_images", 0),
+        "map50": progress.get("current_map", 0.0),
+        "classes": len((task.algorithm_plan or {}).get("targets", [])),
+        "new_images": new_image_count,
+    }
+
+    archive_path = archive_training_version(
+        task_dir=str(task_dir),
+        version=next_version,
+        best_pt_path=str(best_pt),
+        data_yaml_path=str(data_yaml),
+        stats=stats,
+    )
+
+    return {
+        "code": 0, "msg": "ok",
+        "data": {"version": next_version, "archive_path": archive_path},
+    }

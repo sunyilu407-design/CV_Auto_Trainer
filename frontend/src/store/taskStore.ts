@@ -13,6 +13,10 @@ export type Stage =
   | 'upload'
   | 'intent_confirm'
   | 'algorithm_plan'
+  | 'environment'
+  | 'manual_annotation'
+  | 'seed_training'
+  | 'review_auto_labels'
   | 'labeling'
   | 'augment'
   | 'review'
@@ -218,6 +222,9 @@ export interface TrainConfig {
   previewMaxImages: number
   previewMaxEpochs: number
   previewImgsz: number
+  // 增量训练模式
+  incrementalMode: boolean
+  baseModelPath: string | null
 }
 
 export interface PreviewResult {
@@ -228,6 +235,51 @@ export interface PreviewResult {
     bbox: [number, number, number, number]
   }>
   imageBase64?: string
+}
+
+// ---------------------------------------------------------------------------
+// 需求协商 (Negotiation)
+// ---------------------------------------------------------------------------
+
+export interface NegotiationMessage {
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: number
+  metadata?: {
+    should_preview?: boolean
+    config_updated?: boolean
+    converged?: boolean
+  }
+}
+
+export interface DetectionRules {
+  conf_threshold: number
+  iou_threshold: number
+  post_filters: Array<{ type: string; value?: number; unit?: string }>
+}
+
+export interface VocabEntry {
+  primary: string
+  aliases: string[]
+  context_anchors: string[]
+}
+
+export interface AlgorithmHints {
+  scenario_type?: string
+  needs_tracking?: boolean
+  needs_ocr?: boolean
+  events?: Array<{ name_zh: string; trigger: string }>
+  regions?: Array<{ label: string; purpose: string }>
+  performance_hint?: string
+  multi_model_needed?: boolean
+  suggested_pipeline_roles?: string[]
+}
+
+export interface NegotiatedConfig {
+  classes: VLMClass[]
+  detection_rules: DetectionRules
+  vocab: Record<string, VocabEntry>
+  algorithm_hints: AlgorithmHints | null
 }
 
 export interface TrainingProgress {
@@ -255,8 +307,29 @@ export interface TaskState {
   vlmErrorMessage: string | null
   vlmFallbackMode: boolean
 
+  // 需求协商 (negotiation)
+  conversationId: string | null
+  negotiationMessages: NegotiationMessage[]
+  negotiatedConfig: NegotiatedConfig | null
+  negotiationConverged: boolean
+
+  // 增量打标 (snowball)
+  snowballMode: boolean
+  snowballRound: number
+  seedAnnotatedCount: number
+  seedModelPath: string | null
+  seedModelMap: number | null
+  seedAutoLabelStats: {
+    autoAccepted: number
+    needsReview: number
+    noDetection: number
+    avgConfidence: number
+  } | null
+
   // 阶段二
   skipLabeling: boolean
+  skipQualityCheck: boolean
+  labelingImageDir: string | null
   labelingProgress: {
     current: number
     total: number
@@ -299,7 +372,11 @@ export interface TaskState {
   setVLMResult: (result: VLMResult | null) => void
   setVLMStatus: (status: VLMStatus, message?: string | null) => void
   updateVLMClass: (index: number, updates: Partial<VLMClass>) => void
+  removeVLMClass: (index: number) => void
+  addVLMClass: (cls: VLMClass) => void
   setSkipLabeling: (skip: boolean) => void
+  setSkipQualityCheck: (skip: boolean) => void
+  setLabelingImageDir: (dir: string | null) => void
   setAugConfig: (config: Partial<AugmentConfig>) => void
   setWasAugmented: (value: boolean) => void
   setTrainConfig: (config: Partial<TrainConfig>) => void
@@ -309,6 +386,19 @@ export interface TaskState {
   setTrainingProgress: (progress: TrainingProgress | null) => void
   setAlgorithmPlan: (plan: StoredAlgorithmPlan | null) => void
   setArtifacts: (artifacts: Record<string, string>) => void
+  setSnowballMode: (mode: boolean) => void
+  setSnowballRound: (round: number) => void
+  setSeedAnnotatedCount: (count: number) => void
+  setSeedModelPath: (path: string | null) => void
+  setSeedModelMap: (map: number | null) => void
+  setSeedAutoLabelStats: (stats: TaskState['seedAutoLabelStats']) => void
+  // 需求协商 actions
+  setConversationId: (id: string | null) => void
+  addNegotiationMessage: (msg: NegotiationMessage) => void
+  setNegotiationMessages: (msgs: NegotiationMessage[]) => void
+  setNegotiatedConfig: (config: NegotiatedConfig | null) => void
+  setNegotiationConverged: (v: boolean) => void
+  resetNegotiation: () => void
   reset: () => void
 }
 
@@ -354,6 +444,8 @@ const defaultTrainConfig: TrainConfig = {
   previewMaxImages: 20,
   previewMaxEpochs: 30,
   previewImgsz: 416,
+  incrementalMode: false,
+  baseModelPath: null,
 }
 
 export const useTaskStore = create<TaskState>()(
@@ -374,7 +466,23 @@ export const useTaskStore = create<TaskState>()(
   vlmErrorMessage: null,
   vlmFallbackMode: false,
 
+  conversationId: null,
+  negotiationMessages: [],
+  negotiatedConfig: null,
+  negotiationConverged: false,
+
+  snowballMode: false,
+  snowballRound: 0,
+  seedAnnotatedCount: 0,
+  seedModelPath: null,
+  seedModelMap: null,
+  seedAutoLabelStats: null,
+  incrementalResult: null as any,
+  trainingHistory: [] as any[],
+
   skipLabeling: false,
+  skipQualityCheck: true,
+  labelingImageDir: null,
 
   labelingProgress: { current: 0, total: 0, phase: 'detection' },
   labeledImageCount: 0,
@@ -395,7 +503,14 @@ export const useTaskStore = create<TaskState>()(
 
   setStage: (stage) => set({ stage }),
 
-  setTaskMeta: (taskId, taskName) => set({ taskId, taskName }),
+  setTaskMeta: (taskId, taskName) => set({
+    taskId,
+    taskName,
+    skipLabeling: false,
+    labelingImageDir: null,
+    labeledImageCount: 0,
+    labelingProgress: { current: 0, total: 0, phase: 'detection' },
+  }),
 
   setSampleImages: (images) => set({ sampleImages: images }),
 
@@ -426,12 +541,42 @@ export const useTaskStore = create<TaskState>()(
 
   setSkipLabeling: (skip: boolean) => set({ skipLabeling: skip }),
 
+  setSkipQualityCheck: (skip: boolean) => set({ skipQualityCheck: skip }),
+
+  setLabelingImageDir: (dir: string | null) => set({ labelingImageDir: dir }),
+
   updateVLMClass: (index, updates) =>
     set((state) => {
       if (!state.vlmResult) return state
       const newClasses = [...state.vlmResult.classes]
       newClasses[index] = { ...newClasses[index], ...updates }
       return { vlmResult: { ...state.vlmResult, classes: newClasses } }
+    }),
+
+  removeVLMClass: (index) =>
+    set((state) => {
+      if (!state.vlmResult) return state
+      const newClasses = state.vlmResult.classes.filter((_, i) => i !== index)
+      return { vlmResult: { ...state.vlmResult, classes: newClasses } }
+    }),
+
+  addVLMClass: (cls) =>
+    set((state) => {
+      if (!state.vlmResult) {
+        return {
+          vlmResult: {
+            classes: [cls],
+            raw_vlm_response: '',
+            confidence: null,
+          },
+        }
+      }
+      return {
+        vlmResult: {
+          ...state.vlmResult,
+          classes: [...state.vlmResult.classes, cls],
+        },
+      }
     }),
 
   setAugConfig: (config) =>
@@ -486,6 +631,28 @@ export const useTaskStore = create<TaskState>()(
 
   setArtifacts: (artifacts) => set({ artifacts }),
 
+  setSnowballMode: (mode) => set({ snowballMode: mode }),
+  setSnowballRound: (round) => set({ snowballRound: round }),
+  setSeedAnnotatedCount: (count) => set({ seedAnnotatedCount: count }),
+  setSeedModelPath: (path) => set({ seedModelPath: path }),
+  setSeedModelMap: (map) => set({ seedModelMap: map }),
+  setSeedAutoLabelStats: (stats) => set({ seedAutoLabelStats: stats }),
+
+  // 需求协商 actions
+  setConversationId: (id) => set({ conversationId: id }),
+  addNegotiationMessage: (msg) =>
+    set((state) => ({ negotiationMessages: [...state.negotiationMessages, msg] })),
+  setNegotiationMessages: (msgs) => set({ negotiationMessages: msgs }),
+  setNegotiatedConfig: (config) => set({ negotiatedConfig: config }),
+  setNegotiationConverged: (v) => set({ negotiationConverged: v }),
+  resetNegotiation: () =>
+    set({
+      conversationId: null,
+      negotiationMessages: [],
+      negotiatedConfig: null,
+      negotiationConverged: false,
+    }),
+
   reset: () =>
     set({
       taskId: null,
@@ -501,7 +668,19 @@ export const useTaskStore = create<TaskState>()(
       vlmStatus: 'idle',
       vlmErrorMessage: null,
       vlmFallbackMode: false,
+      conversationId: null,
+      negotiationMessages: [],
+      negotiatedConfig: null,
+      negotiationConverged: false,
+      snowballMode: false,
+      snowballRound: 0,
+      seedAnnotatedCount: 0,
+      seedModelPath: null,
+      seedModelMap: null,
+      seedAutoLabelStats: null,
       skipLabeling: false,
+      skipQualityCheck: true,
+      labelingImageDir: null,
       labelingProgress: { current: 0, total: 0, phase: 'detection' },
       labeledImageCount: 0,
       augConfig: defaultAugConfig,

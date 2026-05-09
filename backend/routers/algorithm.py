@@ -13,13 +13,28 @@ from services.algorithm_planner import build_algorithm_plan
 from services.algorithm_preview_service import preview_algorithm_events
 from services.model_registry import get_model_registry, infer_device_tier
 from services.pipeline_compiler import compile_algorithm_pipeline
-from services.settings_manager import get_settings
+from services.settings_manager import get_settings, decrypt_value as _decrypt_value
 from services.task_access import get_task_for_user
 from services.training_recommendation_service import enrich_pipeline_with_training_recommendation
 from services.vlm_algorithm_planner import build_vlm_algorithm_plan, revise_vlm_algorithm_plan
+from types import SimpleNamespace as _SimpleNamespace
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/algorithm", tags=["algorithm"])
+
+
+def _build_reasoning_settings_ns(settings_row) -> _SimpleNamespace:
+    """把 DB UserSettings 行打包成 reasoning_adapter 工厂期望的对象（API key 已解密）。"""
+    enabled = getattr(settings_row, "reasoning_enabled", None)
+    if enabled is None:
+        enabled = True
+    return _SimpleNamespace(
+        reasoning_enabled=bool(enabled),
+        reasoning_provider=(getattr(settings_row, "reasoning_provider", "") or "").strip() or "deepseek",
+        reasoning_base_url=getattr(settings_row, "reasoning_base_url", "") or "",
+        reasoning_api_key=_decrypt_value(getattr(settings_row, "reasoning_api_key_encrypted", "") or ""),
+        reasoning_model=getattr(settings_row, "reasoning_model", "") or "",
+    )
 
 
 class AlgorithmPlanRequest(BaseModel):
@@ -33,6 +48,7 @@ class AlgorithmPlanRequest(BaseModel):
     device_description: Optional[str] = None
     image_count: int = 0
     use_vlm_planner: bool = True
+    algorithm_hints: Optional[dict] = None
 
 
 class AlgorithmPlanResponse(BaseModel):
@@ -152,6 +168,8 @@ def generate_algorithm_plan(
                 platform=payload.platform,
                 device_description=payload.device_description or "",
                 image_count=payload.image_count,
+                reasoning_settings=_build_reasoning_settings_ns(settings),
+                algorithm_hints=payload.algorithm_hints,
             )
         except Exception as e:
             logger.warning("VLM planner failed, falling back to rule-based: %s", e)
@@ -191,7 +209,7 @@ def generate_algorithm_plan(
 def get_algorithm_plan(task_id: str, current_user: dict = Depends(require_auth), db: Session = Depends(get_db)):
     task = get_task_for_user(db, task_id, current_user)
     if not task.algorithm_plan:
-        raise HTTPException(status_code=404, detail="Algorithm plan not found")
+        return {"code": 0, "msg": "ok", "data": None}
 
     preview_pipeline = _recommended_pipeline_config(
         algorithm_plan=task.algorithm_plan,
@@ -313,6 +331,7 @@ def revise_algorithm_plan(
             existing_plan=existing_plan,
             user_feedback=payload.user_feedback,
             vlm_adapter=vlm_adapter,
+            reasoning_settings=_build_reasoning_settings_ns(settings),
             revision_history=revision_history,
             gpu_type=gpu_type,
             platform=payload.platform,
