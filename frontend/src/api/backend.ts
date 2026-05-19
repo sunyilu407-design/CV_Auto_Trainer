@@ -248,6 +248,7 @@ export interface AlgorithmPlanDraft {
     rule_engine_required: boolean
   }
   confidence: number
+  training_version?: number
 }
 
 export interface PretrainedModelInfo {

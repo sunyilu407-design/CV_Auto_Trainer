@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useTaskStore, NegotiationMessage } from '../store/taskStore'
+import { useTaskStore } from '../store/taskStore'
 import { negotiateApi } from '../api/backend'
 
 interface NegotiationChatProps {
@@ -158,7 +158,8 @@ interface StreamBubble {
   isStreaming?: boolean
 }
 
-export default function NegotiationChat({ suppressInit = false }: NegotiationChatProps) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export default function NegotiationChat({ suppressInit: _suppressInit = false }: NegotiationChatProps) {
   const {
     taskId,
     conversationId,
@@ -198,18 +199,6 @@ export default function NegotiationChat({ suppressInit = false }: NegotiationCha
       isStreaming: !isUser,
     }])
     return id
-  }, [])
-
-  const handleStreamAppend = useCallback((id: string, chunk: string) => {
-    setStreams(prev => prev.map(s =>
-      s.id === id ? { ...s, content: s.content + chunk } : s
-    ))
-  }, [])
-
-  const handleStreamDone = useCallback((id: string, metadata?: { configUpdated?: boolean; converged?: boolean }) => {
-    setStreams(prev => prev.map(s =>
-      s.id === id ? { ...s, isStreaming: false, ...metadata } : s
-    ))
   }, [])
 
   // Create empty AI bubble and return its id

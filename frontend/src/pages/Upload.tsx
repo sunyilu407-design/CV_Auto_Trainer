@@ -1,10 +1,11 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useTaskStore, DEVICE_PROFILES, type DeviceProfileId } from '../store/taskStore'
 import { filesApi, taskApi, vlmApi, trainingApi } from '../api/backend'
 import AnnotationCanvas from '../components/AnnotationCanvas'
 
 export default function Upload() {
   const {
+    taskId,
     setTaskMeta,
     setStage,
     setVLMResult,

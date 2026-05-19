@@ -36,6 +36,12 @@ export interface StoredAlgorithmPlan {
   task_id: string
   status: string
   algorithm_plan: AlgorithmPlanDraft
+  offline_evaluation?: {
+    validation_passed?: boolean
+    confidence?: number
+    analysis_zh?: string
+    suggestions_zh?: string[]
+  }
   pipeline_config?: {
     version: string
     metadata: {
