@@ -104,6 +104,11 @@ _MODEL_PREP_STATE = {
     "status": None,
 }
 
+# 是否在 Worker 启动时自动安装所需模型（YOLO-World + CLIP）
+_AUTO_PREPARE_ON_STARTUP = os.getenv("CV_AUTO_TRAINER_WORKER_AUTO_PREPARE", "on").strip().lower() in ("1", "true", "on", "yes")
+# 是否在启动时同时预装 Moondream2（第二段质检模型，会增加下载时间和显存占用）
+_PREPARE_MOONDREAM_ON_STARTUP = os.getenv("CV_AUTO_TRAINER_WORKER_PREPARE_MOONDREAM", "off").strip().lower() in ("1", "true", "on", "yes")
+
 
 def _set_model_prep_step(name: str, status: str, message: str):
     with _MODEL_PREP_LOCK:
@@ -129,14 +134,23 @@ def _model_prep_progress(name: str, status: str, message: str):
 
 
 def _run_model_prepare(include_moondream: bool):
+    import logging
+    logger = logging.getLogger("worker.startup")
+
+    def _log_progress(name: str, status: str, message: str):
+        logger.info(f"[模型准备] {name} -> {status}: {message}")
+        _model_prep_progress(name, status, message)
+
     try:
         from pipeline.stage2_labeler import prepare_labeling_model_cache
 
-        status = prepare_labeling_model_cache(include_moondream=include_moondream, progress_callback=_model_prep_progress)
+        status = prepare_labeling_model_cache(include_moondream=include_moondream, progress_callback=_log_progress)
         _set_model_prep_status(status)
+        logger.info(f"[模型准备] 完成: {status}")
         with _MODEL_PREP_LOCK:
             _MODEL_PREP_STATE["error"] = None
     except Exception as exc:
+        logger.error(f"[模型准备] 失败: {exc}")
         with _MODEL_PREP_LOCK:
             _MODEL_PREP_STATE["error"] = str(exc)
     finally:
@@ -154,7 +168,55 @@ def _refresh_model_status_only():
 
 @app.on_event("startup")
 async def startup_model_status_check():
+    import logging
+    logger = logging.getLogger("worker.startup")
+
+    # 首次启动时检查模型缓存状态（快速，非阻塞）
     await asyncio.to_thread(_refresh_model_status_only)
+
+    if not _AUTO_PREPARE_ON_STARTUP:
+        logger.info("[启动] 模型自动预装已禁用 (CV_AUTO_TRAINER_WORKER_AUTO_PREPARE=off)，跳过启动时安装。")
+        return
+
+    status = _refresh_model_status_only()
+    yolo_ok = status.get("yolo_world", {}).get("installed", False)
+    clip_ok = status.get("clip", {}).get("installed", False)
+    moon_ok = status.get("moondream", {}).get("installed", False)
+
+    need_yolo = not yolo_ok
+    need_clip = not clip_ok
+    need_moon = _PREPARE_MOONDREAM_ON_STARTUP and not moon_ok
+
+    if not (need_yolo or need_clip or need_moon):
+        logger.info("[启动] 所有必需模型（YOLO-World + CLIP）已就绪，跳过预装。")
+        return
+
+    logger.info(
+        f"[启动] 检测到未安装的模型，正在后台预装... "
+        f"需要 YOLO-World={need_yolo}, CLIP={need_clip}, Moondream2={need_moon}"
+    )
+
+    include_moondream = _PREPARE_MOONDREAM_ON_STARTUP
+    with _MODEL_PREP_LOCK:
+        if _MODEL_PREP_STATE["running"]:
+            logger.info("[启动] 模型预装任务已在运行中，跳过重复启动。")
+            return
+        _MODEL_PREP_STATE["running"] = True
+        _MODEL_PREP_STATE["include_moondream"] = include_moondream
+        _MODEL_PREP_STATE["error"] = None
+        if need_yolo:
+            _MODEL_PREP_STATE["steps"]["yolo_world"] = {"status": "running", "message": "启动中准备 YOLO-World"}
+        if need_clip:
+            _MODEL_PREP_STATE["steps"]["clip"] = {"status": "pending", "message": "等待 YOLO-World 类别编码"}
+        if include_moondream and need_moon:
+            _MODEL_PREP_STATE["steps"]["moondream"] = {"status": "pending", "message": "等待下载 Moondream2"}
+        elif not include_moondream:
+            _MODEL_PREP_STATE["steps"]["moondream"] = {"status": "optional", "message": "已选择跳过 Moondream VQA"}
+
+    # 在后台线程执行，不阻塞 uvicorn 启动
+    asyncio.create_task(
+        asyncio.to_thread(_run_model_prepare, include_moondream)
+    )
 
 
 async def _safe_ws_send(ws: WebSocket, data: dict) -> bool:
@@ -622,6 +684,9 @@ async def _handle_command(ws: WebSocket, data: dict):
         # 解析前端传来的相对路径（如 '../backend/uploads/...' -> 项目根目录下的绝对路径）
         raw_dataset_dir = payload.get("dataset_dir", "dataset")
         dataset_dir = str(_resolve_path(raw_dataset_dir))
+        # 增量训练时使用合并后的 data.yaml（由 startIncremental API 生成）
+        raw_data_yaml = payload.get("data_yaml")
+        data_yaml = str(_resolve_path(raw_data_yaml)) if raw_data_yaml else None
 
         try:
             artifacts = await asyncio.to_thread(
@@ -629,6 +694,7 @@ async def _handle_command(ws: WebSocket, data: dict):
                 dataset_dir=dataset_dir,
                 train_config=train_config,
                 progress_callback=training_progress_cb,
+                data_yaml=data_yaml,
             )
 
             await _safe_ws_send(ws, {

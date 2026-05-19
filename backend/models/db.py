@@ -63,6 +63,8 @@ class Task(Base):
     image_dir = Column(String)
     label_dir = Column(String)
     dataset_dir = Column(String)
+    # 增量训练：追加图片存放目录
+    incremental_image_dir = Column(String)
 
 
 class User(Base):

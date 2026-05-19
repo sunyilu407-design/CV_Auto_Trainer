@@ -24,14 +24,16 @@ class LocalTrainer:
         dataset_dir: str,
         train_config: dict,
         progress_callback: Optional[Callable] = None,
+        data_yaml: str | None = None,
     ) -> dict:
         self._output_dir = (
             Path(dataset_dir).parent / "local_training_output" / "exp"
         )
         os.makedirs(self._output_dir, exist_ok=True)
 
-        data_yaml = Path(dataset_dir) / "data.yaml"
-        cmd = self._build_command(train_config, data_yaml)
+        # 增量模式：使用合并后的 data.yaml；首次训练：自动生成
+        yaml_path = Path(data_yaml) if data_yaml else (Path(dataset_dir) / "data.yaml")
+        cmd = self._build_command(train_config, yaml_path)
 
         self._process = subprocess.Popen(
             cmd,

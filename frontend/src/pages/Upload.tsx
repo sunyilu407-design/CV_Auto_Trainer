@@ -1,6 +1,6 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTaskStore, DEVICE_PROFILES, type DeviceProfileId } from '../store/taskStore'
-import { filesApi, taskApi, vlmApi } from '../api/backend'
+import { filesApi, taskApi, vlmApi, trainingApi } from '../api/backend'
 import AnnotationCanvas from '../components/AnnotationCanvas'
 
 export default function Upload() {
@@ -22,6 +22,9 @@ export default function Upload() {
     setUserDescription,
     deviceProfileId,
     setDeviceProfileId,
+    trainConfig,
+    setTrainConfig,
+    algorithmPlan,
   } = useTaskStore()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -33,6 +36,90 @@ export default function Upload() {
   const sampleFileInputRef = useRef<HTMLInputElement>(null)
   const datasetFileInputRef = useRef<HTMLInputElement>(null)
   const videoFileInputRef = useRef<HTMLInputElement>(null)
+
+  // ── Incremental mode: separate file tracking for badcase images ─────────
+  const [incrImages, setIncrImages] = useState<File[]>([])
+  const [incrUploading, setIncrUploading] = useState(false)
+  const [incrError, setIncrError] = useState<string | null>(null)
+  const [incrConfirmData, setIncrConfirmData] = useState<{
+    new_images: number; old_images: number; auto_labeled: number;
+    duplicates_removed: number; base_model_path: string;
+    merged_dataset_dir: string; data_yaml: string;
+    recommended_config: { epochs: number; lr0: number; patience: number; imgsz: number }
+  } | null>(null)
+  const incrFileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleIncrFilesSelected = useCallback((files: FileList | null) => {
+    if (!files) return
+    const allFiles = Array.from(files)
+    const imageExts = new Set(['jpg', 'jpeg', 'png'])
+    const newImgs = allFiles.filter((f) => {
+      const ext = f.name.split('.').pop()?.toLowerCase()
+      return ext && imageExts.has(ext)
+    })
+    setIncrImages((prev) => {
+      const existing = new Set(prev.map((x) => `${x.name}-${x.size}`))
+      const unique = newImgs.filter((x) => !existing.has(`${x.name}-${x.size}`))
+      return [...prev, ...unique]
+    })
+  }, [])
+
+  // ── Incremental mode: upload then call startIncremental ─────────────────
+  const handleIncrementalUpload = async () => {
+    if (!taskId || incrImages.length === 0) return
+    setIncrUploading(true)
+    setIncrError(null)
+    try {
+      // 1. Upload badcase images to uploads/{taskId}/incremental_images/
+      for (const file of incrImages) {
+        const formData = new FormData()
+        formData.append('file', file)
+        await filesApi.upload(taskId, formData, 'incremental_images')
+      }
+      // 2. Backend merges old+new, auto-labels new images with existing best.pt
+      const classNames = (algorithmPlan?.algorithm_plan?.targets ?? []).map(
+        (t: { class_name?: string }) => t.class_name ?? 'target'
+      )
+      const result = await trainingApi.startIncremental(taskId, {
+        auto_label_new: true,
+        class_names: classNames,
+      })
+      // 3. Show confirmation dialog before navigating to train_config
+      setIncrConfirmData({
+        new_images: result.new_images,
+        old_images: result.old_images,
+        auto_labeled: result.auto_labeled,
+        duplicates_removed: result.duplicates_removed,
+        base_model_path: result.base_model_path,
+        merged_dataset_dir: result.merged_dataset_dir,
+        data_yaml: result.data_yaml,
+        recommended_config: result.recommended_config,
+      })
+    } catch (e: unknown) {
+      setIncrError(e instanceof Error ? e.message : '增量数据处理失败')
+    } finally {
+      setIncrUploading(false)
+    }
+  }
+
+  const confirmIncremental = () => {
+    if (!incrConfirmData) return
+    setTrainConfig({
+      incrementalMode: true,
+      baseModelPath: incrConfirmData.base_model_path,
+      model: incrConfirmData.base_model_path,
+      incrementalDatasetDir: incrConfirmData.merged_dataset_dir,
+      incrementalDataYaml: incrConfirmData.data_yaml,
+      epochs: incrConfirmData.recommended_config.epochs,
+      lr0: incrConfirmData.recommended_config.lr0,
+      patience: incrConfirmData.recommended_config.patience,
+      imgsz: incrConfirmData.recommended_config.imgsz,
+    })
+    setIncrConfirmData(null)
+    setStage('train_config')
+  }
+
+  // ── Standard upload ────────────────────────────────────────────────
 
   const activeBoxes = sampleImageBoxes.find((item) => item.imageIndex === activeImageIndex)?.boxes ?? []
 
@@ -221,6 +308,129 @@ export default function Upload() {
         <h1 className="page-title">输入业务需求</h1>
         <p className="page-subtitle">系统会先理解你的业务需求，再结合可选样板图补充视觉细节，生成策略草案</p>
       </div>
+
+      {/* ── Incremental mode: badcase upload ─────────────────────────────────── */}
+      {trainConfig.incrementalMode && taskId && (
+        <div className="card-section" style={{ marginBottom: 24, background: 'rgba(245,158,11,0.04)', border: '1px solid rgba(245,158,11,0.3)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <span style={{ fontSize: 18 }}>⚡</span>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#92400e' }}>增量训练模式</div>
+              <div style={{ fontSize: 12, color: '#a16207', marginTop: 2 }}>
+                上传新的 badcase 图片，系统会用已有模型自动标注，再合并旧数据生成增量数据集
+              </div>
+            </div>
+          </div>
+
+          {/* Selected images list */}
+          {incrImages.length > 0 && (
+            <div style={{ marginBottom: 12, fontSize: 13, color: '#a16207' }}>
+              已选择 <strong>{incrImages.length}</strong> 张增量图片
+              <span style={{ marginLeft: 12, color: 'var(--gray-400)', cursor: 'pointer' }}
+                onClick={() => setIncrImages([])}>
+                清除
+              </span>
+            </div>
+          )}
+
+          {/* Error */}
+          {incrError && (
+            <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fff5f5', borderRadius: 6, fontSize: 13, color: 'var(--ship-red)' }}>
+                {incrError}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => incrFileInputRef.current?.click()}
+              style={{
+                padding: '10px 18px', borderRadius: 8, border: '1.5px solid rgba(245,158,11,0.5)',
+                background: 'rgba(245,158,11,0.06)', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#92400e',
+              }}
+            >
+              📁 上传 Badcase 图片
+            </button>
+            <input
+              ref={incrFileInputRef}
+              type="file"
+              accept="image/jpeg,image/png"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => handleIncrFilesSelected(e.target.files)}
+            />
+
+            <button
+              onClick={handleIncrementalUpload}
+              disabled={incrUploading || incrImages.length === 0}
+              style={{
+                padding: '10px 24px', borderRadius: 8, border: 'none',
+                background: incrImages.length === 0 ? 'var(--gray-200)' : '#f59e0b',
+                color: incrImages.length === 0 ? 'var(--gray-400)' : '#fff',
+                cursor: incrImages.length === 0 ? 'not-allowed' : 'pointer',
+                fontSize: 13, fontWeight: 700,
+              }}
+            >
+              {incrUploading ? '处理中...' : '开始增量训练准备 →'}
+            </button>
+
+            <button
+              onClick={() => {
+                setTrainConfig({ incrementalMode: false, incrementalDatasetDir: null, incrementalDataYaml: null })
+              }}
+              style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--gray-200)', background: 'transparent', cursor: 'pointer', fontSize: 12, color: 'var(--gray-500)' }}
+            >
+              取消增量训练
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Incremental confirmation: show merge stats before proceeding ─────────── */}
+      {incrConfirmData && (
+        <div className="card-section" style={{ marginBottom: 24, border: '1px solid rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.03)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <span style={{ fontSize: 18 }}>⚡</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#92400e' }}>增量数据合并完成</span>
+            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'rgba(245,158,11,0.12)', color: '#92400e' }}>
+              v{incrConfirmData.old_images > 0 ? '→v' : '1'}
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 14 }}>
+            {[
+              { label: '旧图片', value: incrConfirmData.old_images, color: '#6b7280' },
+              { label: '新增图片', value: incrConfirmData.new_images, color: '#2563eb' },
+              { label: '自动标注', value: incrConfirmData.auto_labeled, color: '#16a34a' },
+              { label: '去重移除', value: incrConfirmData.duplicates_removed, color: '#9333ea' },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ textAlign: 'center', padding: '10px 8px', background: '#fff', borderRadius: 8, border: '1px solid var(--gray-100)' }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color }}>{value}</div>
+                <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 2 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 12, color: '#92400e', marginBottom: 14, lineHeight: 1.6 }}>
+            基础模型：<code style={{ fontFamily: 'var(--font-mono)' }}>{incrConfirmData.base_model_path.split('/').pop()}</code>
+            &nbsp;·&nbsp;推荐训练参数：Epochs {incrConfirmData.recommended_config.epochs}
+            &nbsp;·&nbsp;学习率 {incrConfirmData.recommended_config.lr0}
+            &nbsp;·&nbsp;早停 {incrConfirmData.recommended_config.patience}
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={confirmIncremental}
+              style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#f59e0b', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
+            >
+              确认并进入训练配置 →
+            </button>
+            <button
+              onClick={() => setIncrConfirmData(null)}
+              style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid var(--gray-200)', background: 'transparent', cursor: 'pointer', fontSize: 12, color: 'var(--gray-500)' }}
+            >
+              返回修改
+            </button>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
         {/* Left: Image Upload */}

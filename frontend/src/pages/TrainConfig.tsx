@@ -4,13 +4,105 @@ import { useSettingsStore } from '../store/settingsStore'
 import { trainingApi, TrainingEstimate } from '../api/backend'
 import { workerClient } from '../api/worker'
 
-const MODELS = [
-  { value: 'yolo11n.pt', label: 'YOLO11n', sub: '极限压缩，推荐嵌入式' },
-  { value: 'yolo11s.pt', label: 'YOLO11s', sub: '推荐，默认' },
-  { value: 'yolo11m.pt', label: 'YOLO11m', sub: '工控机/服务器' },
-  { value: 'yolo11l.pt', label: 'YOLO11l', sub: '高精度' },
-  { value: 'rtdetr-l.pt', label: 'RT-DETR-L', sub: '密集/遮挡场景' },
+// ─── Model Catalog ────────────────────────────────────────────────────────────
+// Grouped by deployment device tier.
+// Only models that support ultralytics-based training are listed.
+// Non-ultralytics models (SAM-2, EfficientDet, YOLOX-custom) are excluded.
+
+interface ModelOption {
+  value: string
+  label: string
+  family: string
+  /** COCO mAP50-95, for display only */
+  map: string
+  /** Params in millions */
+  params: string
+  /** GFLOPS */
+  flops: string
+  /** GPU FPS on RTX 4090 */
+  fps: string
+  /** Training task types */
+  tasks: string[]
+  /** Device tier recommendation */
+  tiers: ('edge' | 'desktop' | 'server')[]
+  note?: string
+}
+
+const TRAIN_MODELS: ModelOption[] = [
+  // ── YOLOv5 ────────────────────────────────────────────────────────────────
+  { value: 'yolov5n.pt', label: 'YOLOv5n', family: 'YOLOv5', map: '28.0', params: '1.9M', flops: '4.5G', fps: '450', tasks: ['检测'], tiers: ['edge', 'desktop'], note: '极轻量' },
+  { value: 'yolov5s.pt', label: 'YOLOv5s', family: 'YOLOv5', map: '37.4', params: '7.2M', flops: '16.5G', fps: '370', tasks: ['检测'], tiers: ['edge', 'desktop'], note: '成熟稳定' },
+  { value: 'yolov5m.pt', label: 'YOLOv5m', family: 'YOLOv5', map: '45.4', params: '21.2M', flops: '49G', fps: '230', tasks: ['检测'], tiers: ['desktop', 'server'] },
+  { value: 'yolov5l.pt', label: 'YOLOv5l', family: 'YOLOv5', map: '49.0', params: '46.5M', flops: '109G', fps: '140', tasks: ['检测'], tiers: ['desktop', 'server'] },
+  { value: 'yolov5x.pt', label: 'YOLOv5x', family: 'YOLOv5', map: '50.7', params: '86.7M', flops: '206G', fps: '85', tasks: ['检测'], tiers: ['server'] },
+
+  // ── YOLOv8 ────────────────────────────────────────────────────────────────
+  { value: 'yolov8n.pt', label: 'YOLOv8n', family: 'YOLOv8', map: '37.3', params: '3.2M', flops: '8.7G', fps: '520', tasks: ['检测', '分割', '姿态'], tiers: ['edge', 'desktop'], note: '推荐' },
+  { value: 'yolov8s.pt', label: 'YOLOv8s', family: 'YOLOv8', map: '44.9', params: '11.2M', flops: '28.6G', fps: '410', tasks: ['检测', '分割', '姿态'], tiers: ['edge', 'desktop'], note: '工业首选' },
+  { value: 'yolov8m.pt', label: 'YOLOv8m', family: 'YOLOv8', map: '50.2', params: '25.9M', flops: '79G', fps: '280', tasks: ['检测', '分割', '姿态'], tiers: ['desktop', 'server'] },
+  { value: 'yolov8l.pt', label: 'YOLOv8l', family: 'YOLOv8', map: '52.9', params: '43.7M', flops: '165G', fps: '170', tasks: ['检测', '分割', '姿态'], tiers: ['server'] },
+  { value: 'yolov8x.pt', label: 'YOLOv8x', family: 'YOLOv8', map: '54.5', params: '68.2M', flops: '258G', fps: '100', tasks: ['检测', '分割', '姿态'], tiers: ['server'] },
+
+  // ── YOLOv9 ────────────────────────────────────────────────────────────────
+  { value: 'yolov9n.pt', label: 'YOLOv9n', family: 'YOLOv9', map: '38.3', params: '2.0M', flops: '3.8G', fps: '500', tasks: ['检测'], tiers: ['edge', 'desktop'], note: 'GELAN 新架构' },
+  { value: 'yolov9s.pt', label: 'YOLOv9s', family: 'YOLOv9', map: '40.2', params: '7.1M', flops: '17.5G', fps: '380', tasks: ['检测'], tiers: ['edge', 'desktop'], note: '精度优于 v8s' },
+  { value: 'yolov9m.pt', label: 'YOLOv9m', family: 'YOLOv9', map: '42.8', params: '20.1M', flops: '52G', fps: '250', tasks: ['检测'], tiers: ['desktop', 'server'] },
+  { value: 'yolov9l.pt', label: 'YOLOv9l', family: 'YOLOv9', map: '43.7', params: '37.5M', flops: '101G', fps: '160', tasks: ['检测'], tiers: ['server'] },
+  { value: 'yolov9x.pt', label: 'YOLOv9x', family: 'YOLOv9', map: '44.9', params: '75.1M', flops: '185G', fps: '90', tasks: ['检测'], tiers: ['server'] },
+
+  // ── YOLOv10 ────────────────────────────────────────────────────────────────
+  { value: 'yolov10n.pt', label: 'YOLOv10n', family: 'YOLOv10', map: '39.8', params: '2.3M', flops: '6.7G', fps: '600', tasks: ['检测'], tiers: ['edge', 'desktop'], note: 'NMS-free 最快' },
+  { value: 'yolov10s.pt', label: 'YOLOv10s', family: 'YOLOv10', map: '47.5', params: '7.2M', flops: '21.4G', fps: '480', tasks: ['检测'], tiers: ['edge', 'desktop'], note: 'NMS-free 首选' },
+  { value: 'yolov10m.pt', label: 'YOLOv10m', family: 'YOLOv10', map: '51.0', params: '15.4M', flops: '59G', fps: '330', tasks: ['检测'], tiers: ['desktop', 'server'] },
+  { value: 'yolov10l.pt', label: 'YOLOv10l', family: 'YOLOv10', map: '52.8', params: '24.4M', flops: '91G', fps: '220', tasks: ['检测'], tiers: ['server'] },
+  { value: 'yolov10x.pt', label: 'YOLOv10x', family: 'YOLOv10', map: '54.5', params: '29.0M', flops: '137G', fps: '140', tasks: ['检测'], tiers: ['server'] },
+
+  // ── YOLO11 ────────────────────────────────────────────────────────────────
+  { value: 'yolo11n.pt', label: 'YOLO11n', family: 'YOLO11', map: '39.5', params: '2.6M', flops: '6.5G', fps: '580', tasks: ['检测', '分割', '姿态', 'OBB'], tiers: ['edge', 'desktop'], note: '最新+OBB' },
+  { value: 'yolo11s.pt', label: 'YOLO11s', family: 'YOLO11', map: '47.0', params: '9.4M', flops: '21.5G', fps: '450', tasks: ['检测', '分割', '姿态', 'OBB'], tiers: ['edge', 'desktop'], note: '推荐默认', },
+  { value: 'yolo11m.pt', label: 'YOLO11m', family: 'YOLO11', map: '51.5', params: '20.1M', flops: '68G', fps: '310', tasks: ['检测', '分割', '姿态', 'OBB'], tiers: ['desktop', 'server'] },
+  { value: 'yolo11l.pt', label: 'YOLO11l', family: 'YOLO11', map: '53.4', params: '25.3M', flops: '87G', fps: '210', tasks: ['检测', '分割', '姿态', 'OBB'], tiers: ['server'] },
+
+  // ── YOLO26 ────────────────────────────────────────────────────────────────
+  { value: 'yolo26n.pt', label: 'YOLO26n', family: 'YOLO26', map: '41.0', params: '2.0M', flops: '5.0G', fps: '620', tasks: ['检测', '分割', '姿态', 'OBB'], tiers: ['edge', 'desktop'], note: '2025 最新' },
+  { value: 'yolo26s.pt', label: 'YOLO26s', family: 'YOLO26', map: '49.0', params: '7.2M', flops: '16.5G', fps: '490', tasks: ['检测', '分割', '姿态', 'OBB'], tiers: ['edge', 'desktop'], note: '最新最优性价比' },
+  { value: 'yolo26m.pt', label: 'YOLO26m', family: 'YOLO26', map: '53.0', params: '16.0M', flops: '55G', fps: '340', tasks: ['检测', '分割', '姿态', 'OBB'], tiers: ['desktop', 'server'] },
+  { value: 'yolo26l.pt', label: 'YOLO26l', family: 'YOLO26', map: '54.5', params: '22.0M', flops: '76G', fps: '230', tasks: ['检测', '分割', '姿态', 'OBB'], tiers: ['server'] },
+
+  // ── RT-DETR (Transformer) ─────────────────────────────────────────────────
+  { value: 'rtdetr-s.pt', label: 'RT-DETR-S', family: 'RT-DETR', map: '50.0', params: '20M', flops: '60G', fps: '200', tasks: ['检测'], tiers: ['desktop', 'server'], note: 'Transformer · 密集场景' },
+  { value: 'rtdetr-m.pt', label: 'RT-DETR-M', family: 'RT-DETR', map: '51.8', params: '27M', flops: '85G', fps: '175', tasks: ['检测'], tiers: ['desktop', 'server'] },
+  { value: 'rtdetr-l.pt', label: 'RT-DETR-L', family: 'RT-DETR', map: '53.0', params: '32M', flops: '110G', fps: '160', tasks: ['检测'], tiers: ['server'], note: '密集/遮挡首选' },
+  { value: 'rtdetr-x.pt', label: 'RT-DETR-X', family: 'RT-DETR', map: '54.8', params: '67M', flops: '234G', fps: '95', tasks: ['检测'], tiers: ['server'] },
+
+  // ── YOLOX ────────────────────────────────────────────────────────────────
+  { value: 'yolox-s', label: 'YOLOX-S', family: 'YOLOX', map: '44.3', params: '9.0M', flops: '27G', fps: '380', tasks: ['检测'], tiers: ['edge', 'desktop'], note: 'Anchor-Free · 无需锚框调参' },
+  { value: 'yolox-m', label: 'YOLOX-M', family: 'YOLOX', map: '47.5', params: '25.3M', flops: '74G', fps: '240', tasks: ['检测'], tiers: ['desktop', 'server'] },
+  { value: 'yolox-l', label: 'YOLOX-L', family: 'YOLOX', map: '49.6', params: '54.2M', flops: '156G', fps: '150', tasks: ['检测'], tiers: ['server'] },
 ]
+
+type DeviceTier = 'edge' | 'desktop' | 'server'
+
+const TIER_LABELS: Record<DeviceTier, { label: string; icon: string; color: string; desc: string }> = {
+  edge: {
+    label: '边缘设备',
+    icon: '⚡',
+    color: '#16a34a',
+    desc: 'Jetson Nano/Xavier、RTX 1650、Mac M1、低功耗嵌入式',
+  },
+  desktop: {
+    label: '桌面 GPU',
+    icon: '🖥️',
+    color: '#2563eb',
+    desc: 'RTX 3060~4090、Mac M2/M3、高端台式机',
+  },
+  server: {
+    label: '服务器 GPU',
+    icon: '🖧',
+    color: '#9333ea',
+    desc: 'RTX 3090/4090、A100/H100、昇腾、云端实例',
+  },
+}
 
 const SOURCE_LABELS: Record<string, string> = {
   algorithm: '算法推荐',
@@ -195,11 +287,15 @@ export default function TrainConfig() {
           setAppStage('train_config')
         }
       })
-      const datasetDir = trainConfig.incrementalMode
-        ? `../backend/uploads/${taskId}/incremental_dataset`
+      const datasetDir = trainConfig.incrementalMode && trainConfig.incrementalDatasetDir
+        ? trainConfig.incrementalDatasetDir.replace(/^.*?\/uploads\//, '../backend/uploads/')
         : `../backend/uploads/${taskId}/dataset`
+      const dataYaml = trainConfig.incrementalMode && trainConfig.incrementalDataYaml
+        ? trainConfig.incrementalDataYaml.replace(/^.*?\/uploads\//, '../backend/uploads/')
+        : undefined
       workerClient.startLocalTraining({
         dataset_dir: datasetDir,
+        data_yaml: dataYaml,
         train_config: effectiveConfig as unknown as Record<string, unknown>,
       })
     } else {
@@ -240,7 +336,11 @@ export default function TrainConfig() {
           </div>
         </div>
         <h1 className="page-title">训练配置</h1>
-        <p className="page-subtitle">选择模型、训练模式与超参数</p>
+        <p className="page-subtitle">
+          {trainConfig.incrementalMode
+            ? `增量训练 v${(algorithmPlan?.algorithm_plan?.training_version ?? 0) + 1}：基于已有模型微调`
+            : '选择模型、训练模式与超参数'}
+        </p>
       </div>
 
       {trainingRecommendation && (
@@ -329,26 +429,30 @@ export default function TrainConfig() {
       {trainConfig.incrementalMode && (
         <div
           style={{
-            padding: '12px 16px',
+            padding: '14px 18px',
             marginBottom: 16,
-            background: 'rgba(245,158,11,0.08)',
+            background: 'rgba(245,158,11,0.06)',
             border: '1px solid rgba(245,158,11,0.3)',
             borderRadius: 10,
             display: 'flex',
-            alignItems: 'center',
-            gap: 10,
+            alignItems: 'flex-start',
+            gap: 12,
           }}
         >
-          <span style={{ fontSize: 18 }}>⚡</span>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#92400e' }}>增量训练模式</div>
-            <div style={{ fontSize: 12, color: '#a16207' }}>
-              基于上次训练的 best.pt 继续微调，自动降低学习率和 epoch 数
-              {trainConfig.baseModelPath && (
-                <span style={{ marginLeft: 8, fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-                  model: {trainConfig.baseModelPath.split('/').pop()}
+          <span style={{ fontSize: 18, flexShrink: 0 }}>⚡</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#92400e' }}>增量训练模式</span>
+              {trainConfig.incrementalDatasetDir && (
+                <span style={{ fontSize: 11, padding: '1px 8px', borderRadius: 4, background: 'rgba(245,158,11,0.15)', color: '#92400e' }}>
+                  合并数据集已就绪
                 </span>
               )}
+            </div>
+            <div style={{ fontSize: 12, color: '#a16207', lineHeight: 1.6 }}>
+              基于 <code style={{ fontFamily: 'var(--font-mono)', background: 'rgba(245,158,11,0.1)', padding: '1px 4px', borderRadius: 3 }}>{trainConfig.baseModelPath?.split('/').pop() ?? '已选模型'}</code> 继续微调。
+              新的 badcase 图片已通过已有模型自动预标注。
+              学习率 / Epoch / 早停已自动调低以保护已有精度。
             </div>
           </div>
         </div>
@@ -367,39 +471,99 @@ export default function TrainConfig() {
             使用上次训练的 <strong>best.pt</strong> 作为基础模型（增量模式不可切换预训练模型）
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
-            {MODELS.map((m) => {
-              const isActive = trainConfig.model === m.value
+          <div>
+            {/* Active model summary bar */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+              background: 'rgba(10,114,239,0.06)', borderRadius: 8, marginBottom: 14,
+              border: '1px solid rgba(10,114,239,0.15)',
+            }}>
+              <span style={{ fontSize: 12, color: 'var(--gray-400)', minWidth: 60 }}>已选模型</span>
+              <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--develop-blue)' }}>
+                {TRAIN_MODELS.find((m) => m.value === trainConfig.model)?.label ?? trainConfig.model}
+              </span>
+              {(() => {
+                const m = TRAIN_MODELS.find((m) => m.value === trainConfig.model)
+                if (!m) return null
+                return (
+                  <span style={{ display: 'flex', gap: 8 }}>
+                    {m.tasks.map((t) => (
+                      <span key={t} style={{ fontSize: 11, padding: '1px 6px', borderRadius: 4, background: 'rgba(10,114,239,0.1)', color: 'var(--develop-blue)' }}>{t}</span>
+                    ))}
+                    <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>
+                      mAP: {m.map} · {m.params} · {m.fps} FPS
+                    </span>
+                  </span>
+                )
+              })()}
+            </div>
+
+            {/* Tier-grouped model grid */}
+            {(['edge', 'desktop', 'server'] as DeviceTier[]).map((tier) => {
+              const tierModels = TRAIN_MODELS.filter((m) => m.tiers.includes(tier))
+              if (!tierModels.length) return null
+              const tierInfo = TIER_LABELS[tier]
               return (
-                <label
-                  key={m.value}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '12px 8px',
-                    borderRadius: 8,
-                    border: `1.5px solid ${isActive ? 'var(--develop-blue)' : 'var(--gray-100)'}`,
-                    background: isActive ? 'rgba(10,114,239,0.05)' : 'var(--gray-50)',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    textAlign: 'center',
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="model"
-                    value={m.value}
-                    checked={isActive}
-                    onChange={() => setTrainConfig({ model: m.value })}
-                    style={{ display: 'none' }}
-                  />
-                  <span style={{ fontSize: 13, fontWeight: 700, color: isActive ? 'var(--develop-blue)' : 'var(--gray-600)', letterSpacing: '-0.5px' }}>{m.label}</span>
-                  <span style={{ fontSize: 10, color: 'var(--gray-400)' }}>{m.sub}</span>
-                </label>
+                <div key={tier} style={{ marginBottom: 20 }}>
+                  {/* Tier header */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                    <span style={{ fontSize: 14 }}>{tierInfo.icon}</span>
+                    <span style={{ fontWeight: 600, fontSize: 13, color: tierInfo.color }}>{tierInfo.label}</span>
+                    <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>{tierInfo.desc}</span>
+                  </div>
+                  {/* Model cards grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 8 }}>
+                    {tierModels.map((m) => {
+                      const isActive = trainConfig.model === m.value
+                      return (
+                        <label
+                          key={m.value}
+                          style={{
+                            display: 'flex', flexDirection: 'column', gap: 4,
+                            padding: '10px 10px',
+                            borderRadius: 8,
+                            border: `1.5px solid ${isActive ? tierInfo.color : 'var(--gray-100)'}`,
+                            background: isActive ? `${tierInfo.color}0c` : 'var(--gray-50)',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          <input
+                            type="radio"
+                            name="model"
+                            value={m.value}
+                            checked={isActive}
+                            onChange={() => setTrainConfig({ model: m.value })}
+                            style={{ display: 'none' }}
+                          />
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: isActive ? tierInfo.color : 'var(--gray-700)' }}>
+                              {m.label}
+                            </span>
+                            {m.note && (
+                              <span style={{ fontSize: 9, padding: '1px 4px', borderRadius: 3, background: `${tierInfo.color}15`, color: tierInfo.color, whiteSpace: 'nowrap' }}>
+                                {m.note}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--gray-400)', display: 'flex', flexDirection: 'column', gap: 1 }}>
+                            <span>mAP: {m.map} · {m.params}</span>
+                            <span>{m.fps} FPS</span>
+                          </div>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
               )
             })}
+
+            {/* Column legend */}
+            <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>
+                mAP = COCO mAP50-95（越高越好） · FPS = RTX 4090 推理帧率（越高越好） · params = 参数量（越小越轻）
+              </span>
+            </div>
           </div>
         )}
       </div>

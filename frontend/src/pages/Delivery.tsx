@@ -21,6 +21,169 @@ const ROLE_LABELS: Record<string, string> = {
   rule_engine: '规则引擎',
 }
 
+// ── Quality Gate Panel ─────────────────────────────────────────────────────────────
+function QualityGatePanel({
+  report,
+  onIncremental,
+  onExpandClasses,
+  onRevise,
+}: {
+  report: TrainingReport | null
+  onIncremental: () => void
+  onExpandClasses: () => void
+  onRevise: () => void
+}) {
+  const { algorithmPlan } = useTaskStore()
+  const offlineEval = algorithmPlan?.offline_evaluation as {
+    validation_passed?: boolean
+    confidence?: number
+    analysis_zh?: string
+    suggestions_zh?: string[]
+  } | undefined
+
+  const trainScore = report?.score ?? null
+  const validationPass = offlineEval?.validation_passed ?? null
+  const confidence = offlineEval?.confidence ?? null
+  const analysis = offlineEval?.analysis_zh ?? ''
+  const suggestions = offlineEval?.suggestions_zh ?? []
+
+  const trainScorePass = trainScore !== null && trainScore >= 65
+  const overallPass = validationPass === true && trainScorePass
+
+  if (validationPass === null && trainScore === null) return null
+
+  const confidenceColor = confidence !== null
+    ? confidence >= 0.75 ? '#16a34a' : confidence >= 0.5 ? '#d97706' : '#dc2626'
+    : undefined
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{
+        padding: '14px 18px', borderRadius: 10, marginBottom: 12,
+        border: overallPass ? '1px solid #bbf7d0' : '1px solid #fed7aa',
+        background: overallPass ? 'linear-gradient(135deg, #f0fdf4, #dcfce7)' : 'linear-gradient(135deg, #fffbeb, #fef9c3)',
+        display: 'flex', alignItems: 'center', gap: 12,
+      }}>
+        {overallPass ? (
+          <>
+            <div style={{ width: 36, height: 36, borderRadius: 8, background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#15803d' }}>模型质量达标</div>
+              <div style={{ fontSize: 12, color: '#166534', marginTop: 2 }}>
+                视频场景匹配 ✓ &nbsp; 训练指标正常 ✓ &nbsp; 可直接交付使用
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ width: 36, height: 36, borderRadius: 8, background: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#92400e' }}>模型质量未达标，建议优化</div>
+              <div style={{ fontSize: 12, color: '#a16207', marginTop: 2 }}>
+                {validationPass === false && '视频场景匹配不通过'}
+                {validationPass === false && trainScore !== null && '，'}
+                {trainScore !== null && !trainScorePass && `训练评分偏低（${trainScore}分）`}
+              </div>
+            </div>
+          </>
+        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, alignItems: 'center', flexShrink: 0 }}>
+          {confidence !== null && (
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: confidenceColor }}>{Math.round(confidence * 100)}%</div>
+              <div style={{ fontSize: 10, color: 'var(--gray-400)' }}>场景匹配</div>
+            </div>
+          )}
+          {trainScore !== null && (
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: trainScorePass ? '#16a34a' : '#d97706' }}>{trainScore}</div>
+              <div style={{ fontSize: 10, color: 'var(--gray-400)' }}>训练评分</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {analysis && (
+        <div style={{ padding: '12px 16px', borderRadius: 8, background: 'rgba(245,158,11,0.04)', border: '1px solid rgba(245,158,11,0.2)', marginBottom: 12, fontSize: 13, color: 'var(--gray-700)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray-500)', display: 'block', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>视频分析</span>
+          {analysis}
+        </div>
+      )}
+
+      {suggestions.length > 0 && (
+        <div style={{ padding: '12px 16px', borderRadius: 8, background: '#fff', border: '1px solid var(--gray-100)', marginBottom: 12 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray-500)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>优化建议</span>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {suggestions.map((s, i) => (
+              <li key={i} style={{ fontSize: 13, color: 'var(--gray-700)', lineHeight: 1.8 }}>{s}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {!overallPass && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+          <button onClick={onIncremental}
+            style={{ padding: '14px 16px', borderRadius: 10, border: '1.5px solid rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.04)', cursor: 'pointer', textAlign: 'left' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 4 }}>A · 推荐 · 追加 badcase</div>
+            <div style={{ fontSize: 11, color: '#a16207', lineHeight: 1.5 }}>上传离线评估中识别错误的图片，系统自动预标注后微调</div>
+          </button>
+          <button onClick={onRevise}
+            style={{ padding: '14px 16px', borderRadius: 10, border: '1.5px solid rgba(59,130,246,0.3)', background: 'rgba(59,130,246,0.03)', cursor: 'pointer', textAlign: 'left' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#1d4ed8', marginBottom: 4 }}>B · 调整增强策略</div>
+            <div style={{ fontSize: 11, color: '#1e40af', lineHeight: 1.5 }}>提升小目标 / 遮挡场景的数据增强，重新发起训练</div>
+          </button>
+          <button onClick={onExpandClasses}
+            style={{ padding: '14px 16px', borderRadius: 10, border: '1.5px solid rgba(139,92,246,0.3)', background: 'rgba(139,92,246,0.03)', cursor: 'pointer', textAlign: 'left' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#6d28d9', marginBottom: 4 }}>C · 扩充检测类别</div>
+            <div style={{ fontSize: 11, color: '#7c3aed', lineHeight: 1.5 }}>重新进入 IntentConfirm，补充遗漏的检测对象类别</div>
+          </button>
+          <button onClick={() => {}}
+            style={{ padding: '14px 16px', borderRadius: 10, border: '1.5px solid rgba(107,114,128,0.2)', background: 'rgba(107,114,128,0.03)', cursor: 'pointer', textAlign: 'left' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 4 }}>D · 接受并交付</div>
+            <div style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.5 }}>忽略当前提示，继续使用当前模型进行部署</div>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Quick-append shortcut panel ──────────────────────────────────────────────────
+function QuickAppendPanel({ onAppend }: { onAppend: (count: number) => void }) {
+  const [previewCount] = useState(0)
+  return (
+    <div style={{
+      padding: '12px 16px', borderRadius: 10, border: '1.5px solid rgba(245,158,11,0.25)',
+      background: 'rgba(245,158,11,0.03)', marginBottom: 16, fontSize: 13,
+      display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+    }}>
+      <span style={{ fontSize: 16 }}>⚡</span>
+      <span style={{ color: '#92400e', fontWeight: 600 }}>检测到模型短板</span>
+      <span style={{ color: '#a16207', flex: 1 }}>
+        {previewCount > 0 ? `预览中发现 ${previewCount} 张可优化的图片` : '在效果预览中发现识别不足的图片？'}
+      </span>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {previewCount > 0 && (
+          <button onClick={() => onAppend(previewCount)}
+            style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid rgba(245,158,11,0.4)', background: '#f59e0b', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+            追加这 {previewCount} 张图片
+          </button>
+        )}
+        <button onClick={() => onAppend(-1)}
+          style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--gray-200)', background: 'transparent', color: '#6b7280', fontSize: 12, cursor: 'pointer' }}>
+          手动追加
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Main Delivery Page ───────────────────────────────────────────────────────────
 export default function Delivery() {
   const { taskId, trainConfig, artifacts, reset, setStage, setTrainConfig } = useTaskStore()
   const [packageReady, setPackageReady] = useState(false)
@@ -32,10 +195,7 @@ export default function Delivery() {
   const [reportError, setReportError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!taskId) {
-      setArtifactList([])
-      return
-    }
+    if (!taskId) { setArtifactList([]); return }
     filesApi.getArtifacts(taskId).then(setArtifactList).catch(() => setArtifactList([]))
   }, [taskId, packageReady, artifacts])
 
@@ -59,9 +219,7 @@ export default function Delivery() {
   }, [artifactList, artifacts])
 
   const handleDownload = async (filename: string) => {
-    if (!taskId) {
-      return
-    }
+    if (!taskId) return
     try {
       const blob = await filesApi.downloadArtifact(taskId, filename)
       const url = URL.createObjectURL(blob)
@@ -72,24 +230,17 @@ export default function Delivery() {
       link.click()
       link.remove()
       URL.revokeObjectURL(url)
-    } catch (e) {
-      alert(`下载失败: ${e}`)
-    }
+    } catch (e) { alert(`下载失败: ${e}`) }
   }
 
   const handleExportPackage = async () => {
-    if (!taskId) {
-      return
-    }
+    if (!taskId) return
     setPackageLoading(true)
     try {
       await algorithmApi.exportPackage(taskId)
       setPackageReady(true)
-    } catch (e) {
-      alert(`导出算法工程包失败: ${e}`)
-    } finally {
-      setPackageLoading(false)
-    }
+    } catch (e) { alert(`导出算法工程包失败: ${e}`) }
+    finally { setPackageLoading(false) }
   }
 
   const handleGetReport = async () => {
@@ -99,11 +250,25 @@ export default function Delivery() {
     try {
       const r = await trainingApi.getReport(taskId)
       setReport(r)
-    } catch (e) {
-      setReportError(e instanceof Error ? e.message : 'VLM 解读失败')
-    } finally {
-      setReportLoading(false)
-    }
+    } catch (e) { setReportError(e instanceof Error ? e.message : 'VLM 解读失败') }
+    finally { setReportLoading(false) }
+  }
+
+  const handleIncremental = () => {
+    setTrainConfig({ incrementalMode: true, baseModelPath: null, incrementalDatasetDir: null, incrementalDataYaml: null })
+    setStage('upload')
+  }
+
+  const handleExpandClasses = () => {
+    setStage('intent_confirm')
+  }
+
+  const handleRevise = () => {
+    setStage('algorithm_plan')
+  }
+
+  const handleQuickAppend = (_count: number) => {
+    handleIncremental()
   }
 
   const weightFiles = [
@@ -136,19 +301,24 @@ export default function Delivery() {
         <p className="page-subtitle">恭喜！模型训练完成，下载所需格式的模型文件</p>
       </div>
 
+      {/* Quality Gate Panel */}
+      <QualityGatePanel
+        report={report}
+        onIncremental={handleIncremental}
+        onExpandClasses={handleExpandClasses}
+        onRevise={handleRevise}
+      />
+
+      {/* Quick-append shortcut */}
+      <QuickAppendPanel onAppend={handleQuickAppend} />
+
       {/* Success Banner */}
-      <div
-        style={{
-          background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)',
-          border: '1px solid #bbf7d0',
-          borderRadius: 12,
-          padding: '16px 20px',
-          marginBottom: 24,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-        }}
-      >
+      <div style={{
+        background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)',
+        border: '1px solid #bbf7d0', borderRadius: 12,
+        padding: '16px 20px', marginBottom: 24,
+        display: 'flex', alignItems: 'center', gap: 12,
+      }}>
         <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#16a34a', flexShrink: 0, animation: 'pulse 2s ease-in-out infinite' }} />
         <p style={{ fontSize: 14, color: '#15803d', margin: 0, fontWeight: 500 }}>
           模型训练已成功完成！以下是训练产物，可直接下载使用
@@ -159,21 +329,10 @@ export default function Delivery() {
       <div className="card-section" style={{ marginBottom: 16 }}>
         <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>模型权重</h3>
         {weightFiles.length === 0 && (
-          <p style={{ fontSize: 12, color: 'var(--gray-500)', margin: 0 }}>
-            当前还没有可下载的模型权重，请先完成云训练并等待产物回收。
-          </p>
+          <p style={{ fontSize: 12, color: 'var(--gray-500)', margin: 0 }}>当前还没有可下载的模型权重，请先完成云训练并等待产物回收。</p>
         )}
         {weightFiles.map(({ key, label, desc, badge }) => (
-          <div
-            key={key}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '14px 0',
-              borderBottom: '1px solid var(--gray-100)',
-            }}
-          >
+          <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 0', borderBottom: '1px solid var(--gray-100)' }}>
             <div className="flex items-center gap-3">
               <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--gray-100)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gray-500)" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -186,11 +345,7 @@ export default function Delivery() {
                 <p style={{ fontSize: 12, color: 'var(--gray-400)', margin: '2px 0 0' }}>{desc}</p>
               </div>
             </div>
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={() => handleDownload(key)}
-              style={{ flexShrink: 0 }}
-            >
+            <button className="btn btn-secondary btn-sm" onClick={() => handleDownload(key)} style={{ flexShrink: 0 }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               下载
             </button>
@@ -198,6 +353,7 @@ export default function Delivery() {
         ))}
       </div>
 
+      {/* Multi-model pipeline */}
       {multiModelArtifacts && Object.keys(multiModelArtifacts).length > 0 && (
         <div className="card-section" style={{ marginBottom: 16 }}>
           <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>多模型流水线</h3>
@@ -206,15 +362,7 @@ export default function Delivery() {
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {Object.entries(multiModelArtifacts).map(([stepId, entry]) => (
-              <div
-                key={stepId}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 8,
-                  background: entry.source === 'reuse' ? 'rgba(22,163,74,0.04)' : entry.source === 'failed' ? '#fff5f5' : 'var(--gray-50)',
-                  border: entry.source === 'failed' ? '1px solid #fed7d7' : '1px solid var(--gray-100)',
-                }}
-              >
+              <div key={stepId} style={{ padding: '12px 14px', borderRadius: 8, background: entry.source === 'reuse' ? 'rgba(22,163,74,0.04)' : entry.source === 'failed' ? '#fff5f5' : 'var(--gray-50)', border: entry.source === 'failed' ? '1px solid #fed7d7' : '1px solid var(--gray-100)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span className="badge badge-blue" style={{ fontSize: 10 }}>{ROLE_LABELS[entry.role] ?? entry.role}</span>
@@ -226,14 +374,10 @@ export default function Delivery() {
                   <span style={{ fontSize: 10, color: 'var(--gray-400)', fontFamily: 'var(--font-mono)' }}>{stepId}</span>
                 </div>
                 {entry.artifacts && Object.keys(entry.artifacts).length > 0 && (
-                  <div style={{ fontSize: 11, color: 'var(--gray-500)', lineHeight: 1.7 }}>
-                    产物：{Object.keys(entry.artifacts).join(', ')}
-                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--gray-500)', lineHeight: 1.7 }}>产物：{Object.keys(entry.artifacts).join(', ')}</div>
                 )}
                 {entry.source === 'reuse' && entry.cache_id && (
-                  <div style={{ fontSize: 11, color: '#15803d', lineHeight: 1.7 }}>
-                    缓存标识：<code style={{ fontFamily: 'var(--font-mono)' }}>{entry.cache_id}</code>
-                  </div>
+                  <div style={{ fontSize: 11, color: '#15803d', lineHeight: 1.7 }}>缓存标识：<code style={{ fontFamily: 'var(--font-mono)' }}>{entry.cache_id}</code></div>
                 )}
               </div>
             ))}
@@ -247,12 +391,7 @@ export default function Delivery() {
           <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>导出格式</h3>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {exportFiles.map((name) => (
-              <button
-                key={name}
-                className="btn btn-secondary"
-                onClick={() => handleDownload(name)}
-                style={{ padding: '8px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600 }}
-              >
+              <button key={name} className="btn btn-secondary" onClick={() => handleDownload(name)} style={{ padding: '8px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600 }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 {name}
               </button>
@@ -266,9 +405,7 @@ export default function Delivery() {
         <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>训练报告</h3>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: reportFiles.length > 0 ? 16 : 0 }}>
           {reportFiles.length === 0 && !report && (
-            <p style={{ fontSize: 12, color: 'var(--gray-500)', margin: 0 }}>
-              当前没有训练报告文件。
-            </p>
+            <p style={{ fontSize: 12, color: 'var(--gray-500)', margin: 0 }}>当前没有训练报告文件。</p>
           )}
           {reportFiles.map((name) => (
             <button key={name} className="btn btn-secondary" onClick={() => handleDownload(name)} style={{ padding: '8px 16px' }}>
@@ -279,22 +416,11 @@ export default function Delivery() {
         </div>
         {reportFiles.length > 0 && !report && (
           <div>
-            <button
-              className="btn btn-primary"
-              onClick={handleGetReport}
-              disabled={reportLoading}
-              style={{ padding: '8px 20px', fontSize: 13 }}
-            >
+            <button className="btn btn-primary" onClick={handleGetReport} disabled={reportLoading} style={{ padding: '8px 20px', fontSize: 13 }}>
               {reportLoading ? (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-                  AI 解读中...
-                </>
+                <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>AI 解读中...</>
               ) : (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-                  AI 解读训练报告
-                </>
+                <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>AI 解读训练报告</>
               )}
             </button>
             {reportError && <p style={{ fontSize: 12, color: '#dc2626', marginTop: 8 }}>{reportError}</p>}
@@ -305,11 +431,7 @@ export default function Delivery() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
               <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--gray-900)', margin: 0 }}>AI 训练报告解读</h4>
               {report.score != null && (
-                <div style={{
-                  padding: '4px 14px', borderRadius: 20, fontWeight: 700, fontSize: 13,
-                  background: report.score >= 80 ? '#dcfce7' : report.score >= 60 ? '#fef9c3' : '#fee2e2',
-                  color: report.score >= 80 ? '#15803d' : report.score >= 60 ? '#92400e' : '#dc2626',
-                }}>
+                <div style={{ padding: '4px 14px', borderRadius: 20, fontWeight: 700, fontSize: 13, background: report.score >= 80 ? '#dcfce7' : report.score >= 60 ? '#fef9c3' : '#fee2e2', color: report.score >= 80 ? '#15803d' : report.score >= 60 ? '#92400e' : '#dc2626' }}>
                   {report.score} 分
                 </div>
               )}
@@ -343,14 +465,13 @@ export default function Delivery() {
               </div>
             )}
             {report.charts_analyzed && report.charts_analyzed.length > 0 && (
-              <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 8 }}>
-                已分析图表：{report.charts_analyzed.join(', ')}
-              </div>
+              <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 8 }}>已分析图表：{report.charts_analyzed.join(', ')}</div>
             )}
           </div>
         )}
       </div>
 
+      {/* Algorithm package */}
       <div className="card-section" style={{ marginBottom: 32 }}>
         <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>算法工程包</h3>
         <p style={{ fontSize: 12, color: 'var(--gray-500)', marginBottom: 12, lineHeight: 1.6 }}>
@@ -363,13 +484,8 @@ export default function Delivery() {
         </div>
         {packageReady && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {['pipeline.json', 'manifest.json', 'README.md', 'run_pipeline.py', 'sample_input.json', 'sample_output.json'].filter((name) => availableArtifacts.has(name) || packageReady).map((name) => (
-              <button
-                key={name}
-                className="btn btn-secondary"
-                onClick={() => handleDownload(name)}
-                style={{ padding: '8px 16px', fontFamily: 'var(--font-mono)', fontSize: 12 }}
-              >
+            {['pipeline.json', 'manifest.json', 'README.md', 'run_pipeline.py', 'sample_input.json', 'sample_output.json'].map((name) => (
+              <button key={name} className="btn btn-secondary" onClick={() => handleDownload(name)} style={{ padding: '8px 16px', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
                 下载 {name}
               </button>
             ))}
@@ -386,57 +502,24 @@ export default function Delivery() {
       <div className="flex gap-3" style={{ flexWrap: 'wrap' }}>
         <button
           className="btn btn-primary"
-          onClick={() => {
-            setTrainConfig({ incrementalMode: true, baseModelPath: null })
-            setStage('upload')
-          }}
+          onClick={handleIncremental}
           style={{ padding: '10px 24px', fontWeight: 600, borderColor: '#f59e0b', background: '#f59e0b' }}
           title="上传新的 badcase 图片，基于当前模型增量微调"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           追加数据 & 增量训练
         </button>
-        <button
-          className="btn btn-primary"
-          onClick={reset}
-          style={{ padding: '10px 24px', fontWeight: 600 }}
-        >
+        <button className="btn btn-primary" onClick={reset} style={{ padding: '10px 24px', fontWeight: 600 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
           开始新任务
         </button>
-        <button
-          className="btn btn-secondary"
-          onClick={async () => {
-            if (!taskId) return
-            try {
-              const cloned = await taskApi.clone(taskId)
-              alert(`任务已克隆：${cloned.name} (ID: ${cloned.id})`)
-            } catch (e) {
-              alert(`克隆失败: ${e}`)
-            }
-          }}
-          disabled={!taskId}
-          style={{ padding: '10px 20px' }}
-        >
+        <button className="btn btn-secondary" onClick={async () => {
+          if (!taskId) return
+          try { const cloned = await taskApi.clone(taskId); alert(`任务已克隆：${cloned.name} (ID: ${cloned.id})`) }
+          catch (e) { alert(`克隆失败: ${e}`) }
+        }} disabled={!taskId} style={{ padding: '10px 20px' }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
           克隆任务
-        </button>
-        <button
-          className="btn btn-secondary"
-          onClick={async () => {
-            if (!taskId) return
-            try {
-              const tpl = await taskApi.clone(taskId, { as_template: true })
-              alert(`已保存为模板：${tpl.name} (ID: ${tpl.id})`)
-            } catch (e) {
-              alert(`保存模板失败: ${e}`)
-            }
-          }}
-          disabled={!taskId}
-          style={{ padding: '10px 20px' }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-          保存为模板
         </button>
         <button className="btn btn-secondary" onClick={() => window.location.reload()} style={{ padding: '10px 20px' }}>
           刷新页面

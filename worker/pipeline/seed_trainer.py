@@ -1,6 +1,11 @@
 """
 Seed Trainer — 用少量手动标注图片训练一个轻量种子模型 (yolov8n)。
 复用 LocalTrainer 的子进程隔离方式，但参数更轻量。
+
+注意：SEED_MODEL 固定为 yolov8n.pt，
+这是有意为之 — 种子训练的目标是"快速验证"，不是"最优精度"。
+yolov8n.pt 权重极小、下载快、训练快，适合 5~50 张图的场景。
+用户实际训练的模型由 TrainConfig 页面选择，不受此处影响。
 """
 
 import os

@@ -89,11 +89,16 @@ export default function IntentConfirm() {
     setNegotiationMessages,
     setNegotiatedConfig,
     setNegotiationConverged,
+    userDescription,
+    vlmResult,
   } = useTaskStore()
   const { settings } = useSettingsStore()
 
   const [mode, setMode] = useState<'chat' | 'legacy'>('chat')
   const [restoring, setRestoring] = useState(false)
+
+  // 扩充模式：从 Delivery 来时，已有类别但无新需求描述
+  const isExpandMode = !userDescription && !!vlmResult
 
   // 恢复已有对话
   useEffect(() => {
@@ -162,11 +167,21 @@ export default function IntentConfirm() {
     <div style={{ display: 'flex', gap: 16, height: 'calc(100vh - 140px)', padding: '0 0 16px' }}>
       {/* 左侧: 对话面板 (40%) */}
       <div style={{ width: '40%', display: 'flex', flexDirection: 'column', minWidth: 320 }}>
-        <NegotiationChat />
+        <NegotiationChat suppressInit={restoring} />
       </div>
 
       {/* 右侧: 配置预览 + 确认面板 (60%) */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 360 }}>
+        {/* 类别扩充模式 Banner */}
+        {isExpandMode && (
+          <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.25)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 16 }}>🔍</span>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#6d28d9' }}>类别扩充模式 — 从 Delivery 进入</div>
+              <div style={{ fontSize: 11, color: '#7c3aed', marginTop: 2 }}>已有 {vlmResult?.classes.length ?? 0} 个类别，在右侧面板「补充遗漏的类别」中新增检测对象</div>
+            </div>
+          </div>
+        )}
         <div style={{ flex: 1, overflow: 'hidden' }}>
           <ConfigPreview />
         </div>
@@ -208,6 +223,7 @@ function IntentConfirmLegacy({ onSwitchToChat }: { onSwitchToChat?: () => void }
     setStage,
   } = useTaskStore()
   const hasVisualCandidates = !!vlmResult && vlmStatus !== 'failed'
+  const isExpandMode = hasVisualCandidates && !userDescription
 
   const [acknowledgedRed, setAcknowledgedRed] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
@@ -318,9 +334,22 @@ function IntentConfirmLegacy({ onSwitchToChat }: { onSwitchToChat?: () => void }
         </div>
         <h1 className="page-title">确认需求协商</h1>
         <p className="page-subtitle">
-          请确认系统对监测对象、区域、时长和触发结果的理解。确认后会生成能力草图与策略草案。
+          {isExpandMode
+            ? '当前已有类别定义，从 Delivery 扩充新增检测对象'
+            : '请确认系统对监测对象、区域、时长和触发结果的理解。确认后会生成能力草图与策略草案。'}
         </p>
       </div>
+
+      {/* Expand mode banner */}
+      {isExpandMode && (
+        <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(139,92,246,0.05)', border: '1px solid rgba(139,92,246,0.25)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 18 }}>🔍</span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#6d28d9', marginBottom: 2 }}>类别扩充模式</div>
+            <div style={{ fontSize: 12, color: '#7c3aed', lineHeight: 1.5 }}>在下方「补充遗漏的类别」中新增检测对象，已有的 {vlmResult?.classes.length ?? 0} 个类别定义将保留。</div>
+          </div>
+        </div>
+      )}
 
       {vlmStatus === 'failed' && (
         <div

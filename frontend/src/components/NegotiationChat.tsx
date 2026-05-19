@@ -2,7 +2,11 @@ import { useState, useRef, useEffect } from 'react'
 import { useTaskStore, NegotiationMessage } from '../store/taskStore'
 import { negotiateApi } from '../api/backend'
 
-export default function NegotiationChat() {
+interface NegotiationChatProps {
+  suppressInit?: boolean
+}
+
+export default function NegotiationChat({ suppressInit = false }: NegotiationChatProps) {
   const {
     taskId,
     conversationId,
@@ -27,7 +31,7 @@ export default function NegotiationChat() {
 
   // 首次进入时生成开场白（延迟一帧，等 restore 先执行）
   useEffect(() => {
-    if (!taskId || loading) return
+    if (!taskId || loading || suppressInit) return
     const timer = setTimeout(() => {
       // 再次检查，避免和 restore 竞争
       const msgs = useTaskStore.getState().negotiationMessages
@@ -37,7 +41,7 @@ export default function NegotiationChat() {
     }, 100)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId])
+  }, [taskId, suppressInit])
 
   async function handleSend(message?: string, isInitial = false) {
     const text = message ?? input.trim()

@@ -707,19 +707,56 @@ _GPU_HOURLY_RATE: dict[str, float] = {
     "A6000": 3.28,
 }
 
-# Base seconds per epoch per image at imgsz=640 on RTX 4090 (rough estimates)
+# Base seconds per epoch per image at imgsz=640 on RTX 4090.
+# Derived from inference FLOPs as a proxy; YOLO11n used as the reference point (6.5G FLOPs → 0.0010s).
+# Models not listed fall back to 0.0025s.
 _MODEL_BASE_SPEED: dict[str, float] = {
-    "yolo11n.pt": 0.0010,
-    "yolo11s.pt": 0.0016,
-    "yolo11m.pt": 0.0030,
-    "yolo11l.pt": 0.0050,
+    # ── YOLOv5 ────────────────────────────────────────────────────────
+    "yolov5n.pt": 0.0007,
+    "yolov5s.pt": 0.0014,
+    "yolov5m.pt": 0.0045,
+    "yolov5l.pt": 0.0100,
+    "yolov5x.pt": 0.0190,
+    # ── YOLOv8 ────────────────────────────────────────────────────────
     "yolov8n.pt": 0.0010,
     "yolov8s.pt": 0.0016,
     "yolov8m.pt": 0.0030,
     "yolov8l.pt": 0.0050,
-    "yolov5s.pt": 0.0014,
-    "rtdetr-l.pt": 0.0065,
-    "rf-detr-base.pt": 0.0070,
+    "yolov8x.pt": 0.0078,
+    # ── YOLOv9 ────────────────────────────────────────────────────────
+    "yolov9n.pt": 0.0006,
+    "yolov9s.pt": 0.0013,
+    "yolov9m.pt": 0.0048,
+    "yolov9l.pt": 0.0093,
+    "yolov9x.pt": 0.0171,
+    # ── YOLOv10 ────────────────────────────────────────────────────────
+    "yolov10n.pt": 0.0010,
+    "yolov10s.pt": 0.0016,
+    "yolov10m.pt": 0.0036,
+    "yolov10l.pt": 0.0056,
+    "yolov10x.pt": 0.0084,
+    # ── YOLO11 ────────────────────────────────────────────────────────
+    "yolo11n.pt": 0.0010,
+    "yolo11s.pt": 0.0016,
+    "yolo11m.pt": 0.0030,
+    "yolo11l.pt": 0.0050,
+    # ── YOLO26 ────────────────────────────────────────────────────────
+    "yolo26n.pt": 0.0008,
+    "yolo26s.pt": 0.0013,
+    "yolo26m.pt": 0.0034,
+    "yolo26l.pt": 0.0047,
+    # ── RT-DETR (Transformer — slower than CNN YOLOs) ────────────────
+    "rtdetr-s.pt": 0.0092,
+    "rtdetr-m.pt": 0.0131,
+    "rtdetr-l.pt": 0.0169,
+    "rtdetr-x.pt": 0.0360,
+    # ── YOLOX ────────────────────────────────────────────────────────
+    "yolox-s": 0.0021,
+    "yolox-m": 0.0057,
+    "yolox-l": 0.0120,
+    # ── RF-DETR ──────────────────────────────────────────────────────
+    "rf-detr-base": 0.0185,
+    "rf-detr-large": 0.0692,
 }
 
 # GPU relative speed factor (1.0 = RTX 4090)

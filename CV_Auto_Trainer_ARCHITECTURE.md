@@ -1220,6 +1220,141 @@ interface DataQualityReport {
 
 ---
 
+## 7.5 增量训练流程（Snowball / 迭代优化）
+
+> 适用场景：模型已上线部署一段时间后，发现某些场景（badcase）识别效果差，需要补充新数据继续微调而非从头训练。
+
+### 7.5.1 触发路径
+
+```
+Delivery 页面
+  └─ "追加数据 & 增量训练" 按钮
+       └─ 设置 incrementalMode = true → 跳转 Upload 页面
+            └─ 上传 badcase 图片 → 调用 POST /training/{task_id}/incremental
+                 └─ 后端合并新旧数据 + 自动标注 → 返回合并统计
+                      └─ 前端显示确认对话框（用户确认）
+                           └─ 写入 trainConfig → 跳转 TrainConfig 页面
+                                └─ 开始增量训练（使用已有 best.pt 作为预训练权重）
+```
+
+### 7.5.2 关键 API
+
+**POST /training/{task_id}/incremental**
+
+请求体：
+```json
+{
+  "auto_label_new": true,          // 用已有模型对新图片自动预标注
+  "class_names": ["worker", "forklift"]
+}
+```
+
+返回体：
+```json
+{
+  "merged_dataset_dir": "uploads/{task_id}/incremental_dataset",
+  "data_yaml": "uploads/{task_id}/incremental_dataset/data.yaml",
+  "total_images": 120,
+  "old_images": 80,              // 来自首次训练
+  "new_images": 40,             // 新增 badcase
+  "duplicates_removed": 5,       // 与旧数据重复的图片
+  "auto_labeled": 40,            // 新图片已自动标注
+  "train_count": 96,
+  "val_count": 24,
+  "base_model_path": "uploads/{task_id}/training_history/v1/best.pt",
+  "current_version": 1,
+  "next_version": 2,
+  "recommended_config": {
+    "model": "uploads/{task_id}/training_history/v1/best.pt",
+    "epochs": 30,               // 自动降低以保护已有精度
+    "lr0": 0.005,              // 自动降低学习率
+    "patience": 10,
+    "imgsz": 640
+  }
+}
+```
+
+### 7.5.3 数据合并逻辑（worker/utils/incremental_merger.py）
+
+1. **读取旧数据**：从 `training_history/v{latest}/` 获取已有数据集
+2. **去重**：用感知哈希（pHash）对新旧图片去重，避免相同图片重复训练
+3. **自动标注**：若 `auto_label_new=true`，用已有 `best.pt` 对新图片做推理，生成 YOLO 格式标签文件
+4. **合并数据集**：新旧图片 + 标签 → `incremental_dataset/train/` 和 `val/`
+5. **生成 data.yaml**：指向合并后的 train/val 路径，写入 `incremental_dataset/data.yaml`
+6. **归档**：将本次 `best.pt` + `data.yaml` + `stats.json` 存入 `training_history/v{N}/`
+
+### 7.5.4 训练时的路径解析
+
+```
+TrainConfig 页面（incrementalMode=true）
+  ├─ model = base_model_path（已有 best.pt，用于微调）
+  ├─ incrementalDatasetDir = merged_dataset_dir（数据集目录）
+  ├─ incrementalDataYaml = data_yaml（配置文件路径）
+  │
+  └─ Worker（local_trainer.py）
+       ├─ data_yaml = incrementalDataYaml（跳过自动生成，使用合并后的）
+       └─ model.train(..., data=yaml_path, pretrained=model)
+```
+
+### 7.5.5 与首次训练的对比
+
+| 维度 | 首次训练 | 增量训练 |
+|------|---------|---------|
+| VLM 意图解析 | ✓ 需要 | ✗ 跳过 |
+| 数据来源 | 用户上传 | 旧数据 + 新 badcase |
+| 模型权重 | 预训练模型（如 yolo11s.pt） | 已有 best.pt |
+| 学习率 | 默认 0.01 | 自动降至 0.005 |
+| Epochs | 用户选择（默认 100） | 自动降至 30 |
+| 标注方式 | YOLO-World 半自动 + 用户修正 | 自动预标注 + 用户可选修正 |
+
+---
+
+## 7.6 质量门控（Quality Gate）与模型优化路径
+
+### 7.6.1 质量门控机制
+
+在 Delivery 页面，系统根据两个维度综合判定模型是否达标：
+
+| 维度 | 数据来源 | 达标阈值 | 说明 |
+|------|----------|---------|------|
+| 视频场景匹配置信度 | `algorithmPlan.offline_evaluation.validation_passed` + `confidence` | ≥ 75% | 离线视频预识别结果 |
+| 训练评分 | `TrainingReport.score` | ≥ 65 分 | AI 解读训练报告的评分 |
+
+**达标判定**：`validation_passed === true` AND `score ≥ 65` → 显示绿色"模型质量达标"
+
+**未达标**时，触发优化行动面板（Delivery 页面 A/B/C/D 四选项）。
+
+### 7.6.2 优化路径矩阵
+
+| 选项 | 触发条件 | 路径 | 数据影响 |
+|------|---------|------|---------|
+| **A · 追加 badcase（推荐）** | 场景匹配低 / 训练评分低 | Delivery → Upload → startIncremental → TrainConfig → Training | 新增 badcase 自动预标注，合并旧数据 |
+| **B · 调整增强策略** | 小目标 / 遮挡场景召回差 | Delivery → AlgorithmPlan → 调整 augment_config → TrainConfig → Training | 保持当前数据集，改增强参数 |
+| **C · 扩充检测类别** | 漏检是因为类别定义不全 | Delivery → IntentConfirm（扩充模式）→ AlgorithmPlan → TrainConfig → Training | 复用已有数据集，新增类别 |
+| **D · 接受并交付** | 用户决定接受当前效果 | 留在 Delivery，导出模型 | 不改动 |
+
+### 7.6.3 扩充类别模式（IntentConfirm 扩充模式）
+
+从 Delivery 选项 C 进入 IntentConfirm 时，系统检测到 `userDescription === ''` 且 `vlmResult` 已存在，自动进入扩充模式：
+
+- 左侧对话面板预填充已有类别
+- 右侧配置预览保留已有类别
+- 底部"补充遗漏的类别"按钮可追加新类别
+- 确认后回到 AlgorithmPlan，不重新走 Upload 阶段
+
+### 7.6.4 触发增量训练的其他原因
+
+除 Badcase 积累外，触发增量训练的原因还包括：
+
+| 原因 | 表现 | 处理方式 |
+|------|------|---------|
+| 场景漂移（Domain Shift） | 换季 / 换摄像头 / 环境变化 | A · 追加新场景数据 |
+| 数据增强不够 | 小目标 / 遮挡场景召回差 | B · 调增强策略 |
+| 误检率高 | CLIP 词汇太泛化 | C · 细化类别定义 |
+| 新增检测类别 | 业务扩展 | C · 扩充类别 |
+
+---
+
 ## 8. 阶段四：模型训练（本地 GPU / 云端服务器）
 
 > **训练模式选择**：用户在 TrainConfig 页面选择「本地训练」或「云端训练」。云端训练支持任意可通过 SSH 连接的 GPU 服务器（AutoDL / 阿里云 / 腾讯云 / AWS / 学员自有服务器等）。两套路径共享同一套训练配置（model / epochs / imgsz / lr0 / patience 等），最终交付物格式完全一致。
@@ -2082,7 +2217,7 @@ interface AugmentConfig {
 }
 
 interface TrainConfig {
-  model: string           // "yolo11s.pt" 等
+  model: string           // "yolo11s.pt" 等；增量训练时为已有 best.pt 路径
   epochs: number
   imgsz: number
   lr0: number
@@ -2092,6 +2227,13 @@ interface TrainConfig {
   exportFormats: ("onnx" | "engine" | "coreml" | "openvino")[]
   gpuType: string        // "RTX 4090" / "A100" 等（云端训练时使用）
   trainMode: "local" | "cloud"  // 训练模式选择
+  // ── 增量训练模式 ─────────────────────────────
+  incrementalMode: boolean           // true = 增量训练，跳过 VLM 意图解析
+  baseModelPath: string | null       // 已有 best.pt 的路径
+  /** startIncremental API 返回的合并数据集目录（由 worker 解析为绝对路径） */
+  incrementalDatasetDir: string | null
+  /** startIncremental API 返回的合并后 data.yaml 路径 */
+  incrementalDataYaml: string | null
 }
 
 interface TrainingProgress {

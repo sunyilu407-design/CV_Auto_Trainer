@@ -4,7 +4,7 @@ $RootDir = Split-Path -Parent $PSScriptRoot
 $BackendDir = Join-Path $RootDir "backend"
 $FrontendDistDefault = Join-Path $RootDir "frontend\dist"
 
-if (-not $env:CV_AUTO_TRAINER_DB_URL) { $env:CV_AUTO_TRAINER_DB_URL = "postgresql://postgres:postgres@127.0.0.1:5432/cv_auto_trainer" }
+$env:CV_AUTO_TRAINER_DB_URL = "sqlite:///cv_auto_trainer.db"
 if (-not $env:CV_AUTO_TRAINER_SECRET_KEY) { $env:CV_AUTO_TRAINER_SECRET_KEY = "change-me" }
 if (-not $env:CV_AUTO_TRAINER_ADMIN_USERNAME) { $env:CV_AUTO_TRAINER_ADMIN_USERNAME = "admin" }
 if (-not $env:CV_AUTO_TRAINER_ADMIN_PASSWORD) { $env:CV_AUTO_TRAINER_ADMIN_PASSWORD = "change-me" }

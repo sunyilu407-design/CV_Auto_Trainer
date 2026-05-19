@@ -30,10 +30,13 @@ class ModelFamily(str, Enum):
     YOLOV10 = "yolov10"
     YOLOV11 = "yolov11"
     YOLO26 = "yolo26"
-    RF_DETR = "rf-detr"
     RT_DETR = "rt-detr"
+    YOLOX = "yolox"
+    EFFICIENTDET = "efficientdet"
+    SAM = "sam"
     OCR = "ocr"
     CUSTOM = "custom"
+    RF_DETR = "rf-detr"
 
 
 class TaskType(str, Enum):
@@ -226,7 +229,217 @@ _BUILTIN_MODELS: list[dict] = [
         "weaknesses": ["需大显存", "推理较慢"],
         "use_cases": ["高精度需求", "小目标密集", "服务器部署"],
     },
-    # ── YOLOv11 系列 ──
+    {
+        "model_id": "yolov8x.pt", "family": "yolov8", "variant": "xlarge",
+        "display_name": "YOLOv8 XLarge", "display_name_zh": "YOLOv8 超大型",
+        "task_types": ["detection", "classification", "segmentation", "pose"],
+        "input_size_default": 640, "input_size_options": [640, 1280],
+        "params_m": 68.2, "flops_g": 257.8, "map50_coco": 71.0, "map50_95_coco": 54.5,
+        "fps_gpu": 100, "fps_cpu": 2,
+        "min_device_tier": "server_gpu", "recommended_device_tiers": ["server_gpu"],
+        "export_formats": ["onnx", "engine"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "Largest YOLOv8 for absolute maximum accuracy",
+        "description_zh": "YOLOv8 超大型，v8 系列最高精度，适合追求极致精度的服务器场景",
+        "strengths": ["v8 系列最高精度", "密集目标强"],
+        "weaknesses": ["需高端 GPU", "推理最慢"],
+        "use_cases": ["最高精度需求", "研究级", "服务器批量"],
+    },
+    {
+        "model_id": "yolov5l.pt", "family": "yolov5", "variant": "large",
+        "display_name": "YOLOv5 Large", "display_name_zh": "YOLOv5 大型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640, 1280],
+        "params_m": 46.5, "flops_g": 109.1, "map50_coco": 67.3, "map50_95_coco": 49.0,
+        "fps_gpu": 140, "fps_cpu": 6,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["desktop_gpu", "server_gpu"],
+        "export_formats": ["onnx", "engine", "openvino"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "Large YOLOv5 for high-accuracy deployment on GPU",
+        "description_zh": "YOLOv5 大型模型，高精度 GPU 部署，成熟稳定",
+        "strengths": ["高精度", "成熟稳定"],
+        "weaknesses": ["体积大", "需 GPU 显存"],
+        "use_cases": ["高精度需求", "服务器部署"],
+    },
+    {
+        "model_id": "yolov5x.pt", "family": "yolov5", "variant": "xlarge",
+        "display_name": "YOLOv5 XLarge", "display_name_zh": "YOLOv5 超大型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640, 1280],
+        "params_m": 86.7, "flops_g": 205.7, "map50_coco": 68.7, "map50_95_coco": 50.7,
+        "fps_gpu": 85, "fps_cpu": 3,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["server_gpu"],
+        "export_formats": ["onnx", "engine", "openvino"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "Largest YOLOv5 for maximum accuracy",
+        "description_zh": "YOLOv5 超大型，v5 系列最高精度档",
+        "strengths": ["v5 系列最高精度"],
+        "weaknesses": ["非常大", "推理慢"],
+        "use_cases": ["最高精度", "服务器批量"],
+    },
+
+    # ══════════════════════════════════════════════════════════════
+    # YOLOv9 系列 — GELAN + PGI 技术，精度提升显著
+    # 适用：精度优先、愿意用较新架构、GPU 资源充足
+    # ══════════════════════════════════════════════════════════════
+    {
+        "model_id": "yolov9n.pt", "family": "yolov9", "variant": "nano",
+        "display_name": "YOLOv9 Nano", "display_name_zh": "YOLOv9 极小型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [320, 640],
+        "params_m": 2.0, "flops_g": 3.8, "map50_coco": 46.8, "map50_95_coco": 38.3,
+        "fps_gpu": 500, "fps_cpu": 50,
+        "min_device_tier": "edge_low", "recommended_device_tiers": ["edge_low", "edge_mid", "apple_silicon"],
+        "export_formats": ["onnx", "engine", "openvino", "coreml", "tflite"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLOv9 smallest — GELAN architecture, higher accuracy than v8n at similar speed",
+        "description_zh": "YOLOv9 极小型，GELAN 新架构，同等速度下精度高于 v8n",
+        "strengths": ["GELAN 架构", "高效率", "精度优于 v8n"],
+        "weaknesses": ["社区资源少", "生态不如 v8/v11"],
+        "use_cases": ["实时边缘", "嵌入式", "对精度有要求的低功耗场景"],
+    },
+    {
+        "model_id": "yolov9s.pt", "family": "yolov9", "variant": "small",
+        "display_name": "YOLOv9 Small", "display_name_zh": "YOLOv9 小型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [320, 640, 1280],
+        "params_m": 7.1, "flops_g": 17.5, "map50_coco": 51.4, "map50_95_coco": 40.2,
+        "fps_gpu": 380, "fps_cpu": 24,
+        "min_device_tier": "edge_mid", "recommended_device_tiers": ["edge_mid", "edge_high", "desktop_gpu"],
+        "export_formats": ["onnx", "engine", "openvino", "coreml", "tflite"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLOv9 small — PGI/GELAN architecture, stronger than v8s at comparable cost",
+        "description_zh": "YOLOv9 小型，PGI+GELAN 技术，精度明显优于 v8s，适合作为 v8 的升级替代",
+        "strengths": ["精度优于 v8s", "PGI 训练辅助", "GELAN 高效"],
+        "weaknesses": ["比 v8s 稍慢", "生态较新"],
+        "use_cases": ["精度优先的检测", "复杂场景", "替代 v8s 升级"],
+    },
+    {
+        "model_id": "yolov9m.pt", "family": "yolov9", "variant": "medium",
+        "display_name": "YOLOv9 Medium", "display_name_zh": "YOLOv9 中型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640, 1280],
+        "params_m": 20.1, "flops_g": 51.8, "map50_coco": 53.7, "map50_95_coco": 42.8,
+        "fps_gpu": 250, "fps_cpu": 11,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["desktop_gpu", "server_gpu"],
+        "export_formats": ["onnx", "engine", "openvino", "coreml"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLOv9 medium — significant accuracy gain over v8m",
+        "description_zh": "YOLOv9 中型，相比 v8m 有明显精度提升，复杂场景首选",
+        "strengths": ["精度大幅优于 v8m", "大目标检测强"],
+        "weaknesses": ["边缘设备较慢"],
+        "use_cases": ["复杂检测", "多目标", "精度敏感场景"],
+    },
+    {
+        "model_id": "yolov9l.pt", "family": "yolov9", "variant": "large",
+        "display_name": "YOLOv9 Large", "display_name_zh": "YOLOv9 大型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640, 1280],
+        "params_m": 37.5, "flops_g": 100.7, "map50_coco": 55.0, "map50_95_coco": 43.7,
+        "fps_gpu": 160, "fps_cpu": 6,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["desktop_gpu", "server_gpu"],
+        "export_formats": ["onnx", "engine", "openvino"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLOv9 large for high-accuracy GPU deployment",
+        "description_zh": "YOLOv9 大型，高精度 GPU 部署首选之一",
+        "strengths": ["高精度", "大目标好"],
+        "weaknesses": ["需大显存"],
+        "use_cases": ["高精度需求", "服务器部署"],
+    },
+    {
+        "model_id": "yolov9x.pt", "family": "yolov9", "variant": "xlarge",
+        "display_name": "YOLOv9 XLarge", "display_name_zh": "YOLOv9 超大型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640, 1280],
+        "params_m": 75.1, "flops_g": 185.3, "map50_coco": 56.1, "map50_95_coco": 44.9,
+        "fps_gpu": 90, "fps_cpu": 2,
+        "min_device_tier": "server_gpu", "recommended_device_tiers": ["server_gpu"],
+        "export_formats": ["onnx", "engine"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLOv9 xlarge — highest precision in YOLOv9 family",
+        "description_zh": "YOLOv9 超大型，v9 系列最高精度，精度与算力需求均最高",
+        "strengths": ["v9 系列最高精度"],
+        "weaknesses": ["需高端 GPU"],
+        "use_cases": ["研究级精度", "服务器批量"],
+    },
+
+    # ══════════════════════════════════════════════════════════════
+    # YOLOv10 系列 — NMS-free 端到端，延迟最低，实时最优
+    # 适用：延迟敏感场景（NMS 后处理开销大）、实时跟踪
+    # ══════════════════════════════════════════════════════════════
+    {
+        "model_id": "yolov10n.pt", "family": "yolov10", "variant": "nano",
+        "display_name": "YOLOv10 Nano", "display_name_zh": "YOLOv10 极小型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [320, 640],
+        "params_m": 2.3, "flops_g": 6.7, "map50_coco": 53.0, "map50_95_coco": 39.8,
+        "fps_gpu": 600, "fps_cpu": 55,
+        "min_device_tier": "edge_low", "recommended_device_tiers": ["edge_low", "edge_mid", "apple_silicon"],
+        "export_formats": ["onnx", "engine", "openvino", "coreml", "tflite"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLOv10 nano — NMS-free end-to-end, highest speed at nano tier",
+        "description_zh": "YOLOv10 极小型，端到端无 NMS，nano 档位速度最快",
+        "strengths": ["NMS-free", "最高速度", "延迟最优"],
+        "weaknesses": ["生态新"],
+        "use_cases": ["实时边缘", "超低延迟需求", "跟踪任务"],
+    },
+    {
+        "model_id": "yolov10s.pt", "family": "yolov10", "variant": "small",
+        "display_name": "YOLOv10 Small", "display_name_zh": "YOLOv10 小型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [320, 640, 1280],
+        "params_m": 7.2, "flops_g": 21.4, "map50_coco": 63.5, "map50_95_coco": 47.5,
+        "fps_gpu": 480, "fps_cpu": 28,
+        "min_device_tier": "edge_mid", "recommended_device_tiers": ["edge_mid", "edge_high", "desktop_gpu", "apple_silicon"],
+        "export_formats": ["onnx", "engine", "openvino", "coreml", "tflite"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLOv10 small — NMS-free, recommended default for real-time tasks",
+        "description_zh": "YOLOv10 小型，推荐默认选择，NMS-free 延迟最低，实时跟踪首选",
+        "strengths": ["NMS-free", "推荐默认", "速度最快", "跟踪友好"],
+        "weaknesses": ["生态较新"],
+        "use_cases": ["实时检测", "多目标跟踪", "延迟敏感场景"],
+    },
+    {
+        "model_id": "yolov10m.pt", "family": "yolov10", "variant": "medium",
+        "display_name": "YOLOv10 Medium", "display_name_zh": "YOLOv10 中型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640, 1280],
+        "params_m": 15.4, "flops_g": 59.2, "map50_coco": 67.0, "map50_95_coco": 51.0,
+        "fps_gpu": 330, "fps_cpu": 13,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["desktop_gpu", "server_gpu"],
+        "export_formats": ["onnx", "engine", "openvino", "coreml"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLOv10 medium — NMS-free, balanced accuracy and speed",
+        "description_zh": "YOLOv10 中型，精度与速度平衡，端到端无 NMS 后处理开销",
+        "strengths": ["NMS-free", "精度速度平衡"],
+        "weaknesses": ["需 GPU"],
+        "use_cases": ["复杂检测", "实时推理", "跟踪流水线"],
+    },
+    {
+        "model_id": "yolov10l.pt", "family": "yolov10", "variant": "large",
+        "display_name": "YOLOv10 Large", "display_name_zh": "YOLOv10 大型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640, 1280],
+        "params_m": 24.4, "flops_g": 91.3, "map50_coco": 69.5, "map50_95_coco": 52.8,
+        "fps_gpu": 220, "fps_cpu": 7,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["server_gpu"],
+        "export_formats": ["onnx", "engine", "openvino"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLOv10 large for high-accuracy real-time inference",
+        "description_zh": "YOLOv10 大型，高精度实时推理，服务器 GPU 推荐",
+        "strengths": ["高精度", "NMS-free"],
+        "weaknesses": ["需大显存"],
+        "use_cases": ["高精度实时", "服务器部署"],
+    },
+    {
+        "model_id": "yolov10x.pt", "family": "yolov10", "variant": "xlarge",
+        "display_name": "YOLOv10 XLarge", "display_name_zh": "YOLOv10 超大型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640, 1280],
+        "params_m": 29.0, "flops_g": 137.2, "map50_coco": 71.5, "map50_95_coco": 54.5,
+        "fps_gpu": 140, "fps_cpu": 3,
+        "min_device_tier": "server_gpu", "recommended_device_tiers": ["server_gpu"],
+        "export_formats": ["onnx", "engine"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLOv10 xlarge — highest precision in v10 family",
+        "description_zh": "YOLOv10 超大型，v10 系列最高精度，适合追求极致实时精度",
+        "strengths": ["v10 系列最高精度", "NMS-free"],
+        "weaknesses": ["需高端 GPU"],
+        "use_cases": ["最高精度实时", "研究级"],
+    },
+
+    # ══════════════════════════════════════════════════════════════
+    # YOLO11 系列 — Ultralytics 最新一代，轻量高效
+    # 适用：大多数场景首选，综合最优，OBB 旋转目标检测
+    # ══════════════════════════════════════════════════════════════
     {
         "model_id": "yolo11n.pt", "family": "yolov11", "variant": "nano",
         "display_name": "YOLO11 Nano", "display_name_zh": "YOLO11 极小型",
@@ -237,11 +450,11 @@ _BUILTIN_MODELS: list[dict] = [
         "min_device_tier": "edge_low", "recommended_device_tiers": ["edge_low", "edge_mid", "apple_silicon"],
         "export_formats": ["onnx", "engine", "openvino", "coreml", "tflite"],
         "training_framework": "ultralytics", "weight_url": None,
-        "description": "Latest YOLO11 nano with improved efficiency",
-        "description_zh": "YOLO11 最新架构极小模型，效率优于前代",
-        "strengths": ["最新架构", "极高效率", "OBB 支持"],
+        "description": "Latest YOLO11 nano with improved efficiency over all previous nano models",
+        "description_zh": "YOLO11 最新架构极小模型，效率优于前代，支持 OBB 旋转目标检测",
+        "strengths": ["最新架构", "极高效率", "OBB 支持", "多任务"],
         "weaknesses": ["社区资源尚在积累"],
-        "use_cases": ["实时边缘", "旋转目标", "移动端"],
+        "use_cases": ["实时边缘", "旋转目标", "移动端", "OBB 检测"],
     },
     {
         "model_id": "yolo11s.pt", "family": "yolov11", "variant": "small",
@@ -253,11 +466,11 @@ _BUILTIN_MODELS: list[dict] = [
         "min_device_tier": "edge_mid", "recommended_device_tiers": ["edge_mid", "edge_high", "desktop_gpu", "apple_silicon"],
         "export_formats": ["onnx", "engine", "openvino", "coreml", "tflite"],
         "training_framework": "ultralytics", "weight_url": None,
-        "description": "Balanced YOLO11 small model, recommended default",
-        "description_zh": "YOLO11 小型模型，推荐默认选择，平衡性能与精度",
-        "strengths": ["推荐默认", "训练快", "多任务"],
+        "description": "Balanced YOLO11 small model — recommended default for most scenarios",
+        "description_zh": "YOLO11 小型，推荐默认选择，平衡性能与精度，多任务覆盖",
+        "strengths": ["推荐默认", "训练快", "多任务", "OBB"],
         "weaknesses": ["极小目标可加大分辨率"],
-        "use_cases": ["通用检测", "安防", "工业质检", "OBB 检测"],
+        "use_cases": ["通用检测", "安防", "工业质检", "OBB 检测", "旋转目标"],
     },
     {
         "model_id": "yolo11m.pt", "family": "yolov11", "variant": "medium",
@@ -270,7 +483,7 @@ _BUILTIN_MODELS: list[dict] = [
         "export_formats": ["onnx", "engine", "openvino", "coreml"],
         "training_framework": "ultralytics", "weight_url": None,
         "description": "YOLO11 medium for complex multi-class scenarios",
-        "description_zh": "YOLO11 中型模型，适合多类别和复杂场景",
+        "description_zh": "YOLO11 中型，适合多类别和复杂场景，精度优秀",
         "strengths": ["高精度", "多任务"],
         "weaknesses": ["训练时间较长"],
         "use_cases": ["复杂检测", "多目标", "精确分割"],
@@ -286,12 +499,315 @@ _BUILTIN_MODELS: list[dict] = [
         "export_formats": ["onnx", "engine", "openvino"],
         "training_framework": "ultralytics", "weight_url": None,
         "description": "YOLO11 large for maximum detection performance",
-        "description_zh": "YOLO11 大型模型，追求极致检测性能",
-        "strengths": ["顶级精度", "小目标优秀"],
-        "weaknesses": ["大显存需求", "推理较慢"],
+        "description_zh": "YOLO11 大型，追求极致检测性能，小目标优秀",
+        "strengths": ["高精度", "小目标优秀"],
+        "weaknesses": ["大显存需求"],
         "use_cases": ["高精度需求", "小目标密集", "服务器部署"],
     },
-    # ── RF-DETR 系列 ──
+
+    # ══════════════════════════════════════════════════════════════
+    # YOLO26 系列 — 2025 年最新一代，极致精度与效率
+    # 适用：对精度有极致要求、愿意使用最新架构
+    # ══════════════════════════════════════════════════════════════
+    {
+        "model_id": "yolo26n.pt", "family": "yolo26", "variant": "nano",
+        "display_name": "YOLO26 Nano", "display_name_zh": "YOLO26 极小型",
+        "task_types": ["detection", "classification", "segmentation", "pose", "obb"],
+        "input_size_default": 640, "input_size_options": [320, 640],
+        "params_m": 2.0, "flops_g": 5.0, "map50_coco": 55.5, "map50_95_coco": 41.0,
+        "fps_gpu": 620, "fps_cpu": 52,
+        "min_device_tier": "edge_low", "recommended_device_tiers": ["edge_low", "edge_mid", "apple_silicon"],
+        "export_formats": ["onnx", "engine", "openvino", "coreml", "tflite"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLO26 nano — 2025 latest generation, best-in-class efficiency",
+        "description_zh": "YOLO26 最新一代极小模型，各项指标全面超越前代",
+        "strengths": ["最新架构", "效率最优", "多任务"],
+        "weaknesses": ["最新架构，生态待完善"],
+        "use_cases": ["最新边缘部署", "多任务场景"],
+    },
+    {
+        "model_id": "yolo26s.pt", "family": "yolo26", "variant": "small",
+        "display_name": "YOLO26 Small", "display_name_zh": "YOLO26 小型",
+        "task_types": ["detection", "classification", "segmentation", "pose", "obb"],
+        "input_size_default": 640, "input_size_options": [320, 640, 1280],
+        "params_m": 7.2, "flops_g": 16.5, "map50_coco": 65.5, "map50_95_coco": 49.0,
+        "fps_gpu": 490, "fps_cpu": 27,
+        "min_device_tier": "edge_mid", "recommended_device_tiers": ["edge_mid", "edge_high", "desktop_gpu", "apple_silicon"],
+        "export_formats": ["onnx", "engine", "openvino", "coreml", "tflite"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLO26 small — latest generation, best accuracy/speed ratio",
+        "description_zh": "YOLO26 小型，最新一代，精度速度比最优，多任务支持",
+        "strengths": ["最新架构", "精度速度比最优", "多任务", "OBB"],
+        "weaknesses": ["新架构"],
+        "use_cases": ["通用检测", "工业质检", "最新部署"],
+    },
+    {
+        "model_id": "yolo26m.pt", "family": "yolo26", "variant": "medium",
+        "display_name": "YOLO26 Medium", "display_name_zh": "YOLO26 中型",
+        "task_types": ["detection", "classification", "segmentation", "pose", "obb"],
+        "input_size_default": 640, "input_size_options": [640, 1280],
+        "params_m": 16.0, "flops_g": 55.0, "map50_coco": 70.0, "map50_95_coco": 53.0,
+        "fps_gpu": 340, "fps_cpu": 12,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["desktop_gpu", "server_gpu", "apple_silicon"],
+        "export_formats": ["onnx", "engine", "openvino", "coreml"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLO26 medium — best-in-class accuracy for its size tier",
+        "description_zh": "YOLO26 中型，同档位精度最高，适合复杂多类别场景",
+        "strengths": ["同档位最高精度", "最新架构"],
+        "weaknesses": ["需 GPU"],
+        "use_cases": ["复杂检测", "高要求场景"],
+    },
+    {
+        "model_id": "yolo26l.pt", "family": "yolo26", "variant": "large",
+        "display_name": "YOLO26 Large", "display_name_zh": "YOLO26 大型",
+        "task_types": ["detection", "classification", "segmentation", "pose", "obb"],
+        "input_size_default": 640, "input_size_options": [640, 1280],
+        "params_m": 22.0, "flops_g": 76.0, "map50_coco": 71.5, "map50_95_coco": 54.5,
+        "fps_gpu": 230, "fps_cpu": 7,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["server_gpu"],
+        "export_formats": ["onnx", "engine", "openvino"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLO26 large — top-tier accuracy with excellent efficiency",
+        "description_zh": "YOLO26 大型，高精度高效率，服务器部署最新首选",
+        "strengths": ["高精度", "高效率"],
+        "weaknesses": ["需大显存"],
+        "use_cases": ["高精度服务器部署", "复杂场景"],
+    },
+
+    # ══════════════════════════════════════════════════════════════
+    # RT-DETR 系列 — 实时 DETR，Transformer 检测兼顾速度
+    # 适用：密集/重叠目标，高精度实时，GPU 推理
+    # ══════════════════════════════════════════════════════════════
+    {
+        "model_id": "rtdetr-s.pt", "family": "rt-detr", "variant": "small",
+        "display_name": "RT-DETR Small", "display_name_zh": "RT-DETR 小型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640],
+        "params_m": 20.0, "flops_g": 60.0, "map50_coco": 69.0, "map50_95_coco": 50.0,
+        "fps_gpu": 200, "fps_cpu": 4,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["desktop_gpu", "server_gpu"],
+        "export_formats": ["onnx", "engine", "openvino"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "RT-DETR small — lightweight real-time DETR, great for dense objects",
+        "description_zh": "RT-DETR 小型，Transformer 检测器，密集目标表现好，适合桌面 GPU",
+        "strengths": ["Transformer 架构", "密集目标好", "无 NMS", "精度高"],
+        "weaknesses": ["CPU 极慢", "边缘设备不适用"],
+        "use_cases": ["GPU 实时检测", "密集场景", "桌面 GPU 部署"],
+    },
+    {
+        "model_id": "rtdetr-m.pt", "family": "rt-detr", "variant": "medium",
+        "display_name": "RT-DETR Medium", "display_name_zh": "RT-DETR 中型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640],
+        "params_m": 27.0, "flops_g": 85.0, "map50_coco": 70.5, "map50_95_coco": 51.8,
+        "fps_gpu": 175, "fps_cpu": 3,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["desktop_gpu", "server_gpu"],
+        "export_formats": ["onnx", "engine", "openvino"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "RT-DETR medium — balanced real-time DETR for complex scenes",
+        "description_zh": "RT-DETR 中型，精度与速度平衡，Transformer 检测适合复杂场景",
+        "strengths": ["Transformer", "无 NMS", "精度高", "密集目标"],
+        "weaknesses": ["仅 GPU"],
+        "use_cases": ["复杂场景检测", "实时推理"],
+    },
+    {
+        "model_id": "rtdetr-l.pt", "family": "rt-detr", "variant": "large",
+        "display_name": "RT-DETR Large", "display_name_zh": "RT-DETR 大型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640],
+        "params_m": 32.0, "flops_g": 110.0, "map50_coco": 71.5, "map50_95_coco": 53.0,
+        "fps_gpu": 160, "fps_cpu": 4,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["desktop_gpu", "server_gpu"],
+        "export_formats": ["onnx", "engine", "openvino"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "RT-DETR large — high-accuracy real-time DETR on GPU",
+        "description_zh": "RT-DETR 大型，高精度实时检测，GPU 兼顾速度与精度",
+        "strengths": ["Transformer", "高精度", "无 NMS"],
+        "weaknesses": ["需大显存"],
+        "use_cases": ["高精度实时", "服务器部署"],
+    },
+    {
+        "model_id": "rtdetr-x.pt", "family": "rt-detr", "variant": "xlarge",
+        "display_name": "RT-DETR XLarge", "display_name_zh": "RT-DETR 超大型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640],
+        "params_m": 67.0, "flops_g": 234.0, "map50_coco": 73.0, "map50_95_coco": 54.8,
+        "fps_gpu": 95, "fps_cpu": 2,
+        "min_device_tier": "server_gpu", "recommended_device_tiers": ["server_gpu"],
+        "export_formats": ["onnx", "engine"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "RT-DETR xlarge — maximum Transformer-based detection accuracy",
+        "description_zh": "RT-DETR 超大型，Transformer 检测最高精度档，适合服务器",
+        "strengths": ["最高精度 RT-DETR", "Transformer"],
+        "weaknesses": ["需高端 GPU"],
+        "use_cases": ["最高精度需求", "服务器"],
+    },
+
+    # ══════════════════════════════════════════════════════════════
+    # YOLOX 系列 — 美团 Anchor-Free 成熟方案
+    # 适用：需要 Anchor-Free（避免锚框调参）、成熟稳定框架
+    # ══════════════════════════════════════════════════════════════
+    {
+        "model_id": "yolox-s", "family": "yolox", "variant": "small",
+        "display_name": "YOLOX Small", "display_name_zh": "YOLOX 小型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640],
+        "params_m": 9.0, "flops_g": 26.8, "map50_coco": 60.8, "map50_95_coco": 44.3,
+        "fps_gpu": 380, "fps_cpu": 20,
+        "min_device_tier": "edge_mid", "recommended_device_tiers": ["edge_mid", "edge_high", "desktop_gpu"],
+        "export_formats": ["onnx", "engine", "openvino", "coreml", "tflite"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLOX small — anchor-free YOLO by Meituan, mature and stable",
+        "description_zh": "YOLOX 小型，美团开源 Anchor-Free 方案，无需锚框调参，社区成熟",
+        "strengths": ["Anchor-Free", "无需锚框调参", "成熟稳定", "训练简单"],
+        "weaknesses": ["速度略慢于 v8/v10"],
+        "use_cases": ["避免锚框调参", "标准检测任务", "成熟框架"],
+    },
+    {
+        "model_id": "yolox-m", "family": "yolox", "variant": "medium",
+        "display_name": "YOLOX Medium", "display_name_zh": "YOLOX 中型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640],
+        "params_m": 25.3, "flops_g": 73.8, "map50_coco": 64.5, "map50_95_coco": 47.5,
+        "fps_gpu": 240, "fps_cpu": 10,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["desktop_gpu", "server_gpu"],
+        "export_formats": ["onnx", "engine", "openvino", "coreml"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLOX medium — anchor-free, good accuracy for complex scenes",
+        "description_zh": "YOLOX 中型，Anchor-Free 架构，复杂场景精度好，训练稳定",
+        "strengths": ["Anchor-Free", "精度好", "训练稳定"],
+        "weaknesses": ["边缘设备慢"],
+        "use_cases": ["复杂场景", "多目标检测"],
+    },
+    {
+        "model_id": "yolox-l", "family": "yolox", "variant": "large",
+        "display_name": "YOLOX Large", "display_name_zh": "YOLOX 大型",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640],
+        "params_m": 54.2, "flops_g": 155.7, "map50_coco": 66.7, "map50_95_coco": 49.6,
+        "fps_gpu": 150, "fps_cpu": 5,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["server_gpu"],
+        "export_formats": ["onnx", "engine", "openvino"],
+        "training_framework": "ultralytics", "weight_url": None,
+        "description": "YOLOX large for high-accuracy anchor-free detection",
+        "description_zh": "YOLOX 大型，Anchor-Free 高精度，适合服务器部署",
+        "strengths": ["Anchor-Free", "高精度"],
+        "weaknesses": ["需 GPU"],
+        "use_cases": ["高精度需求", "服务器部署"],
+    },
+
+    # ══════════════════════════════════════════════════════════════
+    # EfficientDet 系列 — Google 早期检测器，精度效率平衡
+    # 适用：互补方案、CPU 友好、TFLite 边缘部署（非 ultralytics）
+    # ══════════════════════════════════════════════════════════════
+    {
+        "model_id": "efficientdet-d0", "family": "efficientdet", "variant": "d0",
+        "display_name": "EfficientDet D0", "display_name_zh": "EfficientDet D0",
+        "task_types": ["detection"], "input_size_default": 512, "input_size_options": [512],
+        "params_m": 5.2, "flops_g": 6.4, "map50_coco": 51.5, "map50_95_coco": 33.8,
+        "fps_gpu": 280, "fps_cpu": 30,
+        "min_device_tier": "edge_mid", "recommended_device_tiers": ["edge_mid", "desktop_gpu", "apple_silicon"],
+        "export_formats": ["onnx", "tflite"],
+        "training_framework": "custom", "weight_url": None,
+        "description": "EfficientDet D0 — Google compound-scaled detector, lightweight baseline",
+        "description_zh": "EfficientDet D0，Google 出品，复合缩放架构，轻量级，适合 CPU/Mobile 部署",
+        "strengths": ["Google 架构", "轻量", "CPU 友好", "TFLite 导出"],
+        "weaknesses": ["精度低于 YOLO", "非 ultralytics 生态"],
+        "use_cases": ["CPU 部署", "移动端", "TFLite 边缘"],
+    },
+    {
+        "model_id": "efficientdet-d1", "family": "efficientdet", "variant": "d1",
+        "display_name": "EfficientDet D1", "display_name_zh": "EfficientDet D1",
+        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640],
+        "params_m": 6.6, "flops_g": 11.4, "map50_coco": 53.8, "map50_95_coco": 36.5,
+        "fps_gpu": 220, "fps_cpu": 20,
+        "min_device_tier": "edge_mid", "recommended_device_tiers": ["edge_mid", "desktop_gpu", "apple_silicon"],
+        "export_formats": ["onnx", "tflite"],
+        "training_framework": "custom", "weight_url": None,
+        "description": "EfficientDet D1 — compound scaling, better accuracy than D0",
+        "description_zh": "EfficientDet D1，精度优于 D0，CPU 端友好，TFLite 移动部署首选",
+        "strengths": ["精度优于 D0", "TFLite", "CPU 好"],
+        "weaknesses": ["非 ultralytics"],
+        "use_cases": ["CPU 检测", "移动端", "TFLite 部署"],
+    },
+    {
+        "model_id": "efficientdet-d2", "family": "efficientdet", "variant": "d2",
+        "display_name": "EfficientDet D2", "display_name_zh": "EfficientDet D2",
+        "task_types": ["detection"], "input_size_default": 768, "input_size_options": [768],
+        "params_m": 8.1, "flops_g": 17.9, "map50_coco": 56.2, "map50_95_coco": 39.3,
+        "fps_gpu": 170, "fps_cpu": 14,
+        "min_device_tier": "edge_high", "recommended_device_tiers": ["desktop_gpu", "apple_silicon"],
+        "export_formats": ["onnx", "tflite"],
+        "training_framework": "custom", "weight_url": None,
+        "description": "EfficientDet D2 — compound scaling, higher accuracy, good for mobile GPU",
+        "description_zh": "EfficientDet D2，高精度档，Apple GPU 友好，TFLite 部署质量高",
+        "strengths": ["精度好", "Apple GPU", "TFLite"],
+        "weaknesses": ["非 ultralytics 生态"],
+        "use_cases": ["高精度 CPU/Mobile", "Apple 部署"],
+    },
+
+    # ══════════════════════════════════════════════════════════════
+    # SAM-2 系列 — Meta 视觉分割基础模型
+    # 适用：图像分割、抠图、交互式分割（非传统目标检测）
+    # ══════════════════════════════════════════════════════════════
+    {
+        "model_id": "sam2-tiny", "family": "sam", "variant": "tiny",
+        "display_name": "SAM-2 Tiny", "display_name_zh": "SAM-2 极小型",
+        "task_types": ["segmentation"], "input_size_default": 1024, "input_size_options": [1024],
+        "params_m": 39.0, "flops_g": 0, "map50_coco": None, "map50_95_coco": None,
+        "fps_gpu": 40, "fps_cpu": 0,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["desktop_gpu", "server_gpu"],
+        "export_formats": ["onnx"],
+        "training_framework": "sam2", "weight_url": None,
+        "description": "SAM-2 tiny — Meta Segment Anything 2, zero-shot image segmentation foundation model",
+        "description_zh": "SAM-2 极小型，Meta 分割一切二代，极轻量，适合交互式分割和抠图",
+        "strengths": ["零样本分割", "交互式分割", "SAM 基础"],
+        "weaknesses": ["不是检测器", "需 GPU", "非实时"],
+        "use_cases": ["图像分割", "目标抠图", "交互式标注", "分割辅助打标"],
+    },
+    {
+        "model_id": "sam2-small", "family": "sam", "variant": "small",
+        "display_name": "SAM-2 Small", "display_name_zh": "SAM-2 小型",
+        "task_types": ["segmentation"], "input_size_default": 1024, "input_size_options": [1024],
+        "params_m": 46.0, "flops_g": 0, "map50_coco": None, "map50_95_coco": None,
+        "fps_gpu": 35, "fps_cpu": 0,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["desktop_gpu", "server_gpu"],
+        "export_formats": ["onnx"],
+        "training_framework": "sam2", "weight_url": None,
+        "description": "SAM-2 small — balanced zero-shot segmentation, recommended default for SAM-2",
+        "description_zh": "SAM-2 小型，推荐默认，零样本分割，质量与速度平衡",
+        "strengths": ["零样本", "质量速度平衡", "分割质量高"],
+        "weaknesses": ["需 GPU", "非检测"],
+        "use_cases": ["图像分割", "抠图", "辅助标注"],
+    },
+    {
+        "model_id": "sam2-base", "family": "sam", "variant": "base",
+        "display_name": "SAM-2 Base", "display_name_zh": "SAM-2 基础型",
+        "task_types": ["segmentation"], "input_size_default": 1024, "input_size_options": [1024],
+        "params_m": 97.0, "flops_g": 0, "map50_coco": None, "map50_95_coco": None,
+        "fps_gpu": 25, "fps_cpu": 0,
+        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["server_gpu"],
+        "export_formats": ["onnx"],
+        "training_framework": "sam2", "weight_url": None,
+        "description": "SAM-2 base — higher quality segmentation at moderate cost",
+        "description_zh": "SAM-2 基础型，高质量分割，适合对分割质量有要求的场景",
+        "strengths": ["高质量", "零样本"],
+        "weaknesses": ["需较大显存"],
+        "use_cases": ["高质量分割", "服务器批量"],
+    },
+    {
+        "model_id": "sam2-large", "family": "sam", "variant": "large",
+        "display_name": "SAM-2 Large", "display_name_zh": "SAM-2 大型",
+        "task_types": ["segmentation"], "input_size_default": 1024, "input_size_options": [1024],
+        "params_m": 200.0, "flops_g": 0, "map50_coco": None, "map50_95_coco": None,
+        "fps_gpu": 15, "fps_cpu": 0,
+        "min_device_tier": "server_gpu", "recommended_device_tiers": ["server_gpu"],
+        "export_formats": ["onnx"],
+        "training_framework": "sam2", "weight_url": None,
+        "description": "SAM-2 large — highest quality segmentation for professional use",
+        "description_zh": "SAM-2 大型，专业级分割质量，适合对精度要求最高的场景",
+        "strengths": ["最高分割质量", "专业级"],
+        "weaknesses": ["需高端 GPU"],
+        "use_cases": ["最高质量需求", "专业标注"],
+    },
+
+    # ══════════════════════════════════════════════════════════════
+    # RF-DETR 系列 — Roboflow Transformer 检测器
+    # 适用：高精度需求、密集重叠目标
+    # ══════════════════════════════════════════════════════════════
     {
         "model_id": "rf-detr-base", "family": "rf-detr", "variant": "base",
         "display_name": "RF-DETR Base", "display_name_zh": "RF-DETR 基础型",
@@ -301,8 +817,8 @@ _BUILTIN_MODELS: list[dict] = [
         "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["desktop_gpu", "server_gpu"],
         "export_formats": ["onnx", "engine"],
         "training_framework": "rf_detr", "weight_url": None,
-        "description": "Roboflow DETR — transformer-based detector with high accuracy, good for dense/overlapping objects",
-        "description_zh": "RF-DETR 基于 Transformer 的检测器，密集/重叠目标表现优异，精度非常高",
+        "description": "Roboflow DETR — transformer-based, excellent for dense/overlapping objects",
+        "description_zh": "RF-DETR 基于 Transformer，密集/重叠目标表现优异，精度非常高",
         "strengths": ["Transformer 架构", "密集目标优秀", "无 NMS", "高精度"],
         "weaknesses": ["推理较慢", "需 GPU", "导出格式有限"],
         "use_cases": ["密集目标检测", "重叠遮挡场景", "高精度需求", "仓位匹配"],
@@ -316,44 +832,16 @@ _BUILTIN_MODELS: list[dict] = [
         "min_device_tier": "server_gpu", "recommended_device_tiers": ["server_gpu"],
         "export_formats": ["onnx", "engine"],
         "training_framework": "rf_detr", "weight_url": None,
-        "description": "Large RF-DETR for absolute maximum accuracy on powerful servers",
-        "description_zh": "RF-DETR 大型模型，超高精度，需要高性能服务器 GPU",
+        "description": "Large RF-DETR — maximum accuracy on powerful servers",
+        "description_zh": "RF-DETR 大型，超高精度，需要高性能服务器 GPU",
         "strengths": ["最高精度", "Transformer", "密集场景"],
         "weaknesses": ["非常大", "推理慢", "需 A100 级 GPU"],
-        "use_cases": ["极高精度需求", "研究级", "服务器批量处理"],
+        "use_cases": ["极高精度需求", "研究级", "服务器批量"],
     },
-    # ── RT-DETR 系列 ──
-    {
-        "model_id": "rtdetr-l.pt", "family": "rt-detr", "variant": "large",
-        "display_name": "RT-DETR Large", "display_name_zh": "RT-DETR 大型",
-        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640],
-        "params_m": 32.0, "flops_g": 110.0, "map50_coco": 71.5, "map50_95_coco": 53.0,
-        "fps_gpu": 160, "fps_cpu": 4,
-        "min_device_tier": "desktop_gpu", "recommended_device_tiers": ["desktop_gpu", "server_gpu"],
-        "export_formats": ["onnx", "engine", "openvino"],
-        "training_framework": "ultralytics", "weight_url": None,
-        "description": "Real-Time DETR, high accuracy with reasonable speed on GPU",
-        "description_zh": "实时 DETR 模型，GPU 上兼顾精度与速度",
-        "strengths": ["Transformer", "ultralytics 集成", "无 NMS"],
-        "weaknesses": ["CPU 很慢", "边缘设备不适用"],
-        "use_cases": ["GPU 实时检测", "密集场景", "精准定位"],
-    },
-    {
-        "model_id": "rtdetr-x.pt", "family": "rt-detr", "variant": "xlarge",
-        "display_name": "RT-DETR XLarge", "display_name_zh": "RT-DETR 超大型",
-        "task_types": ["detection"], "input_size_default": 640, "input_size_options": [640],
-        "params_m": 67.0, "flops_g": 234.0, "map50_coco": 73.0, "map50_95_coco": 54.8,
-        "fps_gpu": 95, "fps_cpu": 2,
-        "min_device_tier": "server_gpu", "recommended_device_tiers": ["server_gpu"],
-        "export_formats": ["onnx", "engine"],
-        "training_framework": "ultralytics", "weight_url": None,
-        "description": "Largest RT-DETR, for maximum Transformer-based detection accuracy",
-        "description_zh": "RT-DETR 超大型模型，Transformer 检测最高精度档",
-        "strengths": ["极高精度", "Transformer"],
-        "weaknesses": ["非常大", "仅服务器"],
-        "use_cases": ["最高精度需求", "服务器部署"],
-    },
-    # ── OCR 引擎 ──
+
+    # ══════════════════════════════════════════════════════════════
+    # OCR 引擎
+    # ══════════════════════════════════════════════════════════════
     {
         "model_id": "easyocr",
         "family": "ocr",
@@ -578,21 +1066,37 @@ def infer_device_tier(gpu_type: str | None, platform: str | None = None) -> str:
 
     gpu_lower = gpu_type.lower().strip()
 
-    if any(kw in gpu_lower for kw in ("a100", "h100", "h200", "l40", "a6000", "a40", "v100")):
+    # 服务器级 GPU（A100/H100/昇腾/Quadro L4/A10 等）
+    if any(kw in gpu_lower for kw in ("a100", "h100", "h200", "l40", "a6000", "a40", "v100", "h800", "a10", "l4", "ascend", "npu")):
         return DeviceTier.SERVER_GPU.value
-    if any(kw in gpu_lower for kw in ("rtx", "gtx", "rtx 3", "rtx 4", "rtx 2", "titan")):
+
+    # 消费级 GPU（RTX / GTX / Quadro）
+    if any(kw in gpu_lower for kw in ("rtx", "gtx", "titan", "quadro")):
+        if "4090" in gpu_lower or "3090" in gpu_lower:
+            return DeviceTier.SERVER_GPU.value
         return DeviceTier.DESKTOP_GPU.value
-    if "orin" in gpu_lower or "agx" in gpu_lower:
+
+    # NVIDIA Jetson 边缘
+    if "orin" in gpu_lower:
         return DeviceTier.EDGE_HIGH.value
-    if "xavier" in gpu_lower or "nx" in gpu_lower:
+    if "xavier" in gpu_lower:
         return DeviceTier.EDGE_MID.value
-    if any(kw in gpu_lower for kw in ("nano", "jetson nano", "rpi", "raspberry")):
+    if "nano" in gpu_lower:
         return DeviceTier.EDGE_LOW.value
+
+    # 其他边缘/嵌入式
+    if any(kw in gpu_lower for kw in ("rpi", "raspberry", "jetson", "movidius", "edge tpu")):
+        return DeviceTier.EDGE_LOW.value
+
+    # Apple Silicon
     if any(kw in gpu_lower for kw in ("m1", "m2", "m3", "m4", "apple")):
         return DeviceTier.APPLE_SILICON.value
+
+    # 云端
     if "cloud" in gpu_lower or "autodl" in gpu_lower:
         return DeviceTier.CLOUD_GENERIC.value
 
+    # 未知：保守判断为消费级 GPU
     return DeviceTier.DESKTOP_GPU.value
 
 

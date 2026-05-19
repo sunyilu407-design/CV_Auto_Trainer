@@ -225,6 +225,10 @@ export interface TrainConfig {
   // 增量训练模式
   incrementalMode: boolean
   baseModelPath: string | null
+  /** 增量训练时，合并后数据集的路径（由 startIncremental API 返回） */
+  incrementalDatasetDir: string | null
+  /** 增量训练时，合并后 data.yaml 的路径（由 startIncremental API 返回） */
+  incrementalDataYaml: string | null
 }
 
 export interface PreviewResult {
@@ -446,6 +450,8 @@ const defaultTrainConfig: TrainConfig = {
   previewImgsz: 416,
   incrementalMode: false,
   baseModelPath: null,
+  incrementalDatasetDir: null,
+  incrementalDataYaml: null,
 }
 
 export const useTaskStore = create<TaskState>()(

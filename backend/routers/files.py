@@ -62,6 +62,8 @@ def upload_file(
 
     if subdir == "images":
         task.image_dir = str(task_dir.resolve())
+    elif subdir == "incremental_images":
+        task.incremental_image_dir = str(task_dir.resolve())
         db.commit()
 
     return {"code": 0, "msg": "ok", "data": {"path": str(file_path)}}

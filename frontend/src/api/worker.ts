@@ -276,6 +276,8 @@ class WorkerClient {
 
   startLocalTraining(payload: {
     dataset_dir: string
+    /** 增量训练时使用合并后的 data.yaml 路径 */
+    data_yaml?: string
     train_config: Record<string, unknown>
   }) {
     this.send({ type: 'start_local_training', payload })

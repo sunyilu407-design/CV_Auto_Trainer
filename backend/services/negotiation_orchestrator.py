@@ -179,7 +179,12 @@ class NegotiationOrchestrator:
             # 首轮就用 VLM parse 生成基础配置，前端立即可展示
             updated_config = self._fallback_config_from_vlm(initial_understanding)
             conv.current_config = updated_config
-            logger.info("First turn: structured opening + fallback config, no LLM call (<1s)")
+            conv.algorithm_hints = updated_config.get("algorithm_hints")
+            logger.info(
+                "First turn: structured opening + fallback config (from VLM parse %d classes), "
+                "no LLM call (<1s)",
+                len(classes),
+            )
 
         else:
             # 非首轮：调用 Agent A（始终传入 initial_understanding + user_description）
@@ -218,7 +223,8 @@ class NegotiationOrchestrator:
                 except Exception as exc:
                     logger.warning("Agent B config generation failed: %s", exc)
                     # Agent B 失败时用 VLM parse 兜底，确保前端有配置可展示
-                    if initial_understanding and not conv.current_config:
+                    # 注意：不能用 "not conv.current_config" 做条件，因为首轮已设置过
+                    if initial_understanding:
                         updated_config = self._fallback_config_from_vlm(initial_understanding)
                         conv.current_config = updated_config
                         logger.info("Using fallback config from VLM parse after Agent B failure")
