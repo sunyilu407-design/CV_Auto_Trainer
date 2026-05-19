@@ -70,6 +70,7 @@ def _ensure_task_columns():
         "quality_report": "ALTER TABLE tasks ADD COLUMN quality_report JSON",
         "artifact_paths": "ALTER TABLE tasks ADD COLUMN artifact_paths JSON",
         "error_message": "ALTER TABLE tasks ADD COLUMN error_message TEXT",
+        "incremental_image_dir": "ALTER TABLE tasks ADD COLUMN incremental_image_dir VARCHAR",
     }
     _ensure_table_columns("tasks", required_columns)
 
