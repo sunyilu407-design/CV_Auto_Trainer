@@ -780,3 +780,55 @@ input[type="checkbox"]:checked::after {
 .mb-4 { margin-bottom: var(--space-4); }
 .mb-6 { margin-bottom: var(--space-6); }
 .mb-8 { margin-bottom: var(--space-8); }
+
+/* ─── Streaming UI Animations ─────────────────────────────────────── */
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes typing-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+@keyframes thinking-dot {
+  0%, 100% { transform: scale(0.6); opacity: 0.3; }
+  50% { transform: scale(1); opacity: 0.8; }
+}
+
+@keyframes mini-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Typing dots in header */
+.typing-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #0a72ef;
+  animation: typing-dot 1.2s ease-in-out infinite;
+}
+
+/* Loading dots in loading indicator */
+.thinking-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gray-300);
+  animation: thinking-dot 1s ease-in-out infinite;
+}
+
+/* Mini spinner in send button */
+.mini-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: mini-spin 0.7s linear infinite;
+}

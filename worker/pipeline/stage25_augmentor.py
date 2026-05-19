@@ -1,11 +1,14 @@
 import albumentations as A
 import cv2
+import logging
 import math
 import os
 import shutil
 from pathlib import Path
 from typing import Optional, Callable
 from utils.image_files import list_image_files
+
+_logger = logging.getLogger("augmentor")
 
 
 def build_pipeline(
@@ -147,7 +150,11 @@ def augment_dataset(
                 if progress_callback:
                     progress_callback(generated, needed, "augmentation")
 
-            except Exception:
+            except Exception as exc:
+                _logger.warning(
+                    "Augmentation failed for %s (aug_idx=%d): %s. Skipping this augmentation.",
+                    img_path.stem, aug_idx, exc,
+                )
                 continue
 
     # 可选：删除原图以节省存储（增强图已复制，原图不再需要）
@@ -162,6 +169,13 @@ def augment_dataset(
                 deleted_count += 1
             except OSError:
                 pass
+
+    if generated < needed * 0.8:
+        _logger.warning(
+            "Augmentation produced fewer images than targeted: generated=%d, needed=%d (%.0f%%). "
+            "Check logs above for per-image failures.",
+            generated, needed, (generated / needed * 100) if needed > 0 else 0,
+        )
 
     return {
         "existing": existing,

@@ -5,7 +5,7 @@ import { trainingApi } from '../api/backend'
 import AugPreview from '../components/AugPreview'
 
 export default function AugmentConfig() {
-  const { taskId, vlmResult, augConfig, setAugConfig, setStage, setTotalImageCount, setSplitStats, setQualityReport, setWasAugmented, labeledImageCount } = useTaskStore()
+  const { taskId, vlmResult, augConfig, setAugConfig, setStage, setTotalImageCount, setSplitStats, setQualityReport, setWasAugmented, labeledImageCount, augmentationGenerated } = useTaskStore()
   const [augmenting, setAugmenting] = useState(false)
   const [preparing, setPreparing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -59,8 +59,10 @@ export default function AugmentConfig() {
     workerClient.connect()
     workerClient.onMessage((msg) => {
       if (msg.type === 'progress' && msg.stage === 'augmentation') {
+        // msg.current 是已生成的增强图数量，msg.total 是每张图的目标增强次数
+        // 前端进度条展示"已完成多少张增强图"，而非百分比
         useTaskStore.setState({
-          totalImageCount: Math.round((msg.current as number) / (msg.total as number) * augConfig.targetCount),
+          augmentationGenerated: msg.current as number,
         })
       }
       if (msg.type === 'stage_complete' && msg.stage === 'augmentation') {
@@ -352,6 +354,30 @@ export default function AugmentConfig() {
       </div>
 
       {/* Actions */}
+      {augmenting && (
+        <div style={{ marginBottom: 16, padding: '16px 20px', background: '#fff', border: '1px solid var(--gray-100)', borderRadius: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ fontSize: 13, color: 'var(--gray-600)', fontWeight: 500 }}>
+              正在增强图片…
+            </span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--preview-pink)' }}>
+              {augmentationGenerated} / {augConfig.targetCount - labeledImageCount} 张
+            </span>
+          </div>
+          <div style={{ height: 8, background: 'var(--gray-100)', borderRadius: 4, overflow: 'hidden' }}>
+            <div
+              style={{
+                height: '100%',
+                width: `${Math.min(100, Math.round(augmentationGenerated / Math.max(1, augConfig.targetCount - labeledImageCount) * 100))}%`,
+                background: 'var(--preview-pink)',
+                borderRadius: 4,
+                transition: 'width 0.3s',
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {error && (
         <div style={{ marginBottom: 16, padding: '12px 16px', background: 'rgba(255,91,79,0.08)', border: '1px solid rgba(255,91,79,0.2)', borderRadius: 8, fontSize: 13, color: 'var(--ship-red)' }}>
           {error}

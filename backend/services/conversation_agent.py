@@ -146,16 +146,7 @@ class ConversationAgent:
         is_first_message: bool = False,
     ) -> ConversationResponse:
         """
-        处理一轮对话。
-
-        Args:
-            user_message: 用户本轮输入
-            conversation_history: 历史消息 [{"role": "user"|"assistant", "content": "..."}]
-            initial_understanding: VLM parse 的初始理解结果（首轮时提供）
-            current_config_summary: 当前配置摘要（供参考）
-            preview_stats: 最近一次预览统计 {"hits": N, "false_positives": N, "misses": N}
-            sample_images_base64: 样张图片（让 VLM 看）
-            is_first_message: 是否首轮（开场白）
+        处理一轮对话（一次性返回）。
         """
         # 构建 user prompt
         user_prompt = self._build_user_prompt(
@@ -187,6 +178,57 @@ class ConversationAgent:
                 converged=False,
                 missing=["系统错误，需重试"],
             )
+
+    def stream_chat(
+        self,
+        user_message: str,
+        conversation_history: List[Dict[str, str]],
+        initial_understanding: Optional[Dict[str, Any]] = None,
+        current_config_summary: Optional[str] = None,
+        preview_stats: Optional[Dict[str, Any]] = None,
+        sample_images_base64: Optional[List[str]] = None,
+        is_first_message: bool = False,
+    ):
+        """
+        流式对话：yield 文本片段，最后 yield 结构化 metadata。
+
+        Yields:
+            str: 文本片段（逐 token/逐句）
+            dict: 最后一条元数据 {"type": "done", "response": ConversationResponse}
+        """
+        user_prompt = self._build_user_prompt(
+            user_message=user_message,
+            initial_understanding=initial_understanding,
+            current_config_summary=current_config_summary,
+            preview_stats=preview_stats,
+            is_first_message=is_first_message,
+        )
+        messages = self._build_messages(conversation_history, user_prompt)
+
+        try:
+            # 流式调用，拼接完整响应
+            full_text = ""
+            for chunk in self.vlm.stream_call_api(
+                messages,
+                max_tokens=2048,
+                temperature=0.7,
+                top_p=0.9,
+            ):
+                full_text += chunk
+                yield chunk
+
+            response = self._parse_response(full_text)
+            yield {"type": "done", "response": response}
+        except Exception as exc:
+            logger.error("ConversationAgent stream_chat failed: %s", exc)
+            yield "抱歉，AI 助手暂时无法响应，请稍后重试。"
+            yield {"type": "done", "response": ConversationResponse(
+                reply="抱歉，AI 助手暂时无法响应，请稍后重试。",
+                should_regenerate=False,
+                should_preview=False,
+                converged=False,
+                missing=["系统错误，需重试"],
+            )}
 
     def generate_opening(
         self,

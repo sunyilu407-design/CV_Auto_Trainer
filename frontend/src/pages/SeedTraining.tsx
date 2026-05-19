@@ -18,6 +18,8 @@ export default function SeedTraining() {
   const [progress, setProgress] = useState({ epoch: 0, totalEpochs: 50, map50: 0 })
   const [autoLabelProgress, setAutoLabelProgress] = useState({ current: 0, total: 0 })
   const [error, setError] = useState<string | null>(null)
+  const [highConf, setHighConf] = useState(0.5)
+  const [lowConf, setLowConf] = useState(0.25)
   const wsRef = useRef<WebSocket | null>(null)
 
   const startTraining = () => {
@@ -39,6 +41,8 @@ export default function SeedTraining() {
           payload: {
             task_id: taskId,
             class_names: classNames,
+            high_conf: highConf,
+            low_conf: lowConf,
           },
         }),
       )
@@ -133,8 +137,51 @@ export default function SeedTraining() {
       >
         {phase === 'idle' && (
           <div style={{ textAlign: 'center' }}>
+            {/* Confidence threshold controls */}
+            <div style={{ background: 'var(--gray-50)', borderRadius: 8, padding: '14px 16px', marginBottom: 16, textAlign: 'left' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gray-600)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                自动标注置信度阈值
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 12 }}>
+                <div>
+                  <label style={{ fontSize: 12, color: 'var(--gray-500)', display: 'block', marginBottom: 4 }}>
+                    自动采纳阈值 <span style={{ color: '#16a34a', fontWeight: 700 }}>≥ {highConf}</span>
+                  </label>
+                  <input
+                    type="range" min="0.1" max="0.9" step="0.05"
+                    value={highConf}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value)
+                      setHighConf(v)
+                      if (v < lowConf) setLowConf(v)
+                    }}
+                    style={{ width: '100%', accentColor: '#16a34a' }}
+                  />
+                  <div style={{ fontSize: 10, color: 'var(--gray-400)', marginTop: 2 }}>高置信 → 直接采纳</div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, color: 'var(--gray-500)', display: 'block', marginBottom: 4 }}>
+                    待审核阈值 <span style={{ color: '#f59e0b', fontWeight: 700 }}>≥ {lowConf}</span>
+                  </label>
+                  <input
+                    type="range" min="0.05" max="0.8" step="0.05"
+                    value={lowConf}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value)
+                      setLowConf(v)
+                      if (v > highConf) setHighConf(v)
+                    }}
+                    style={{ width: '100%', accentColor: '#f59e0b' }}
+                  />
+                  <div style={{ fontSize: 10, color: 'var(--gray-400)', marginTop: 2 }}>低置信 → 需人工审核</div>
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--gray-400)', lineHeight: 1.6 }}>
+                阈值越低 → 自动采纳越多，审核工作量越大
+              </div>
+            </div>
             <p style={{ marginBottom: 16, color: 'var(--gray-600)', fontSize: 14 }}>
-              Ready to train seed model (yolov8n, ~50 epochs)
+              已标注 {seedAnnotatedCount} 张图，将训练 yolov8n 后对剩余图片自动打标
             </p>
             <button className="btn btn-primary" onClick={startTraining}>
               Start Seed Training
@@ -206,12 +253,27 @@ export default function SeedTraining() {
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>✓</div>
             <p style={{ fontWeight: 600, marginBottom: 4 }}>Seed training & auto-labeling complete</p>
-            {useTaskStore.getState().seedAutoLabelStats?.needsReview ? (
-              <p style={{ fontSize: 13, color: '#f59e0b' }}>
-                {useTaskStore.getState().seedAutoLabelStats?.needsReview} low-confidence boxes need review.
+            {(() => {
+              const stats = useTaskStore.getState().seedAutoLabelStats
+              return (
+                <div style={{ marginTop: 12, padding: '12px 16px', borderRadius: 8, background: 'var(--gray-50)', textAlign: 'left', fontSize: 13, color: 'var(--gray-600)' }}>
+                  <div style={{ marginBottom: 8 }}>
+                    <span style={{ color: '#16a34a', fontWeight: 700 }}>✓ 自动采纳 {stats?.autoAccepted ?? 0}</span>
+                    {' · '}
+                    <span style={{ color: '#f59e0b', fontWeight: 700 }}>待审核 {stats?.needsReview ?? 0}</span>
+                    {' · '}
+                    <span>无检测 {stats?.noDetection ?? 0}</span>
+                  </div>
+                  <div>阈值：采纳 ≥ {highConf} · 待审 ≥ {lowConf}</div>
+                </div>
+              )
+            })()}
+            {(useTaskStore.getState().seedAutoLabelStats?.needsReview ?? 0) > 0 ? (
+              <p style={{ fontSize: 13, color: '#f59e0b', marginTop: 8 }}>
+                {(useTaskStore.getState().seedAutoLabelStats?.needsReview ?? 0)} 个低置信框需要审核。
               </p>
             ) : (
-              <p style={{ fontSize: 13, color: 'var(--gray-500)' }}>
+              <p style={{ fontSize: 13, color: 'var(--gray-500)', marginTop: 8 }}>
                 Proceeding to data augmentation and full training pipeline.
               </p>
             )}

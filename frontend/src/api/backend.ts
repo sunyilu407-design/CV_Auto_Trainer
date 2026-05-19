@@ -472,6 +472,88 @@ export interface NegotiateConversationData {
 }
 
 export const negotiateApi = {
+  /**
+   * SSE 流式对话。返回 EventSource 或 fetch ReadableStream 消费者。
+   * onChunk(text): 每次收到文本片段时调用
+   * onDone(data):   结束时调用（包含完整结构）
+   * onError(err):   出错时调用
+   */
+  streamChat: (payload: {
+    task_id: string
+    message: string
+    conversation_id?: string | null
+    preview_stats?: { hits: number; false_positives: number; misses: number } | null
+    include_initial?: boolean
+  }, opts: {
+    onChunk: (text: string) => void
+    onDone: (data: NegotiateChatResponse & { type: 'done' }) => void
+    onError: (err: Error) => void
+  }): () => void => {
+    const baseUrl = (window as any).__API_BASE_URL__ || ''
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
+    const host = baseUrl || window.location.host
+    const url = `${protocol}//${host}/api/negotiate/chat/stream`
+
+    const abortController = new AbortController()
+
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: abortController.signal,
+      credentials: 'include',
+    }).then(async (resp) => {
+      if (!resp.ok) {
+        const text = await resp.text()
+        opts.onError(new Error(`HTTP ${resp.status}: ${text}`))
+        return
+      }
+      const reader = resp.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        // SSE 解析：按事件分隔
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''  // 不完整的行保留到下次
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const raw = line.slice(6).trim()
+            if (!raw) continue
+            try {
+              const data = JSON.parse(raw)
+              if (data.type === 'text') {
+                opts.onChunk(data.content)
+              } else if (data.type === 'done' || data.type === 'error') {
+                if (data.type === 'done') {
+                  opts.onDone({ ...data, type: 'done' } as any)
+                } else {
+                  opts.onError(new Error(data.message || 'Stream error'))
+                }
+                return
+              }
+            } catch {
+              // ignore parse errors
+            }
+          }
+        }
+      }
+    }).catch((err) => {
+      if (err.name !== 'AbortError') {
+        opts.onError(err)
+      }
+    })
+
+    // 返回取消函数
+    return () => abortController.abort()
+  },
+
   chat: (payload: {
     task_id: string
     message: string
@@ -993,6 +1075,9 @@ export const filesApi = {
     }>(`/files/${taskId}/seed-annotations`),
   deleteSeedAnnotation: (taskId: string, imageName: string) =>
     request<void>(`/files/${taskId}/seed-annotations/${encodeURIComponent(imageName)}`, { method: 'DELETE' }),
+  /** 审核完成后重新合并三路标注（manual / review / auto），写入 labeled_images/ + labels/ */
+  mergeLabelsAfterReview: (taskId: string) =>
+    request<{ total_labeled: number; image_dir: string; label_dir: string }>(`/files/${taskId}/merge-labels`, { method: 'POST' }),
   listDatasetImages: (taskId: string, page: number = 1, size: number = 50) =>
     request<{
       images: Array<{ name: string; has_annotation: boolean }>

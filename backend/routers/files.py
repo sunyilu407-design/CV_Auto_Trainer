@@ -530,3 +530,34 @@ def get_review_label(
             boxes.append({"cls": cls, "cx": cx, "cy": cy, "w": w, "h": h})
 
     return {"code": 0, "msg": "ok", "data": boxes}
+
+
+@router.post("/{task_id}/merge-labels")
+def merge_labels_after_review(
+    task_id: str,
+    current_user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """
+    审核完成后重新合并三路标注（manual / review / auto），
+    将结果写入 labeled_images/ 和 labels/ 目录，
+    供后续 augment / training 流程使用。
+
+    Fix for: review_labels 被丢弃的 bug
+    """
+    task = get_task_for_user(db, task_id, current_user)
+
+    from worker.pipeline.seed_auto_labeler import merge_seed_and_auto_labels
+    from services.settings_manager import get_settings
+
+    settings = get_settings(db, current_user["user_id"])
+    task_dir = Path("./uploads") / task_id
+
+    class_names = [
+        cls.get("class_name", f"class_{i}")
+        for i, cls in enumerate(task.vlm_result or [])
+    ]
+
+    result = merge_seed_and_auto_labels(str(task_dir), class_names)
+
+    return {"code": 0, "msg": "ok", "data": result}

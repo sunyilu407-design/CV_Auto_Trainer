@@ -345,6 +345,7 @@ export interface TaskState {
   augConfig: AugmentConfig
   wasAugmented: boolean
   totalImageCount: number
+  augmentationGenerated: number
 
   // 阶段三
   splitStats: { train: number; val: number; test: number }
@@ -496,6 +497,7 @@ export const useTaskStore = create<TaskState>()(
   augConfig: defaultAugConfig,
   wasAugmented: false,
   totalImageCount: 0,
+  augmentationGenerated: 0,
 
   splitStats: { train: 0, val: 0, test: 0 },
   qualityReport: null,
@@ -692,6 +694,7 @@ export const useTaskStore = create<TaskState>()(
       augConfig: defaultAugConfig,
       wasAugmented: false,
       totalImageCount: 0,
+      augmentationGenerated: 0,
       splitStats: { train: 0, val: 0, test: 0 },
       qualityReport: null,
       trainConfig: defaultTrainConfig,

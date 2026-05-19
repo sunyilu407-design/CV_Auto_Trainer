@@ -171,8 +171,10 @@ def merge_seed_and_auto_labels(
     class_names: list[str],
 ) -> dict:
     """
-    合并手动种子标注 + 自动采纳标注，输出为最终 labeled_images + labels 目录。
-    用于对接后续 augmentation / training 流程。
+    合并三路标注：手动种子标注 + 自动采纳标注 + 审核后采纳标注，
+    输出为最终 labeled_images + labels 目录。
+
+    优先级：manual_seed > review_accepted > auto_accepted
 
     Returns: { "total_labeled": int, "image_dir": str, "label_dir": str }
     """
@@ -181,6 +183,7 @@ def merge_seed_and_auto_labels(
     task_path = Path(task_dir)
     seed_label_dir = task_path / "seed_labels"
     auto_label_dir = task_path / "auto_labels"
+    review_label_dir = task_path / "review_labels"
 
     # Find image source
     image_dir: Optional[Path] = None
@@ -201,13 +204,14 @@ def merge_seed_and_auto_labels(
 
     merged_stems: set[str] = set()
 
-    # Copy seed labels first (manual annotations have highest priority)
+    # Priority 1: manual seed annotations (highest trust)
     if seed_label_dir.exists():
         for lbl in seed_label_dir.glob("*.txt"):
             if lbl.stat().st_size == 0:
                 continue
             stem = lbl.stem
-            # Find corresponding image
+            if stem in merged_stems:
+                continue
             img_file = _find_image(image_dir, stem)
             if img_file is None:
                 continue
@@ -215,14 +219,31 @@ def merge_seed_and_auto_labels(
             shutil.copy(img_file, out_image_dir / img_file.name)
             merged_stems.add(stem)
 
-    # Copy auto-accepted labels (only if not already covered by seed)
+    # Priority 2: review-accepted labels (user explicitly confirmed)
+    # ReviewAutoLabels saves accepted boxes back to seed_labels/ — already handled above.
+    # Explicitly copy non-empty review labels only if not already merged.
+    if review_label_dir.exists():
+        for lbl in review_label_dir.glob("*.txt"):
+            if lbl.stat().st_size == 0:
+                continue
+            stem = lbl.stem
+            if stem in merged_stems:
+                continue
+            img_file = _find_image(image_dir, stem)
+            if img_file is None:
+                continue
+            shutil.copy(lbl, out_label_dir / lbl.name)
+            shutil.copy(img_file, out_image_dir / img_file.name)
+            merged_stems.add(stem)
+
+    # Priority 3: auto-accepted labels (highest conf from seed model)
     if auto_label_dir.exists():
         for lbl in auto_label_dir.glob("*.txt"):
             if lbl.stat().st_size == 0:
                 continue
             stem = lbl.stem
             if stem in merged_stems:
-                continue  # seed annotation takes priority
+                continue  # manual or review takes priority
             img_file = _find_image(image_dir, stem)
             if img_file is None:
                 continue

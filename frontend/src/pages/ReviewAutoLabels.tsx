@@ -107,12 +107,16 @@ export default function ReviewAutoLabels() {
     }
   }, [currentImage, currentIndex, images.length])
 
-  const handleFinishReview = useCallback(() => {
+  const handleFinishReview = useCallback(async () => {
+    // Re-merge all three label sources (manual / review / auto) into labeled_images/ + labels/
+    if (taskId) {
+      await filesApi.mergeLabelsAfterReview(taskId)
+    }
     const accepted = Object.values(decisions).filter((d) => d === 'accept').length
     const currentCount = useTaskStore.getState().labeledImageCount || 0
     setLabeledImageCount(currentCount + accepted)
-    setStage('train_config')
-  }, [decisions, setLabeledImageCount, setStage])
+    setStage('augment')
+  }, [decisions, setLabeledImageCount, setStage, taskId])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -140,8 +144,11 @@ export default function ReviewAutoLabels() {
         <p style={{ fontSize: 14, color: 'var(--gray-500)', marginBottom: 16 }}>
           No low-confidence predictions to review.
         </p>
-        <button className="btn btn-primary" onClick={() => setStage('train_config')}>
-          Continue to Training
+        <button className="btn btn-primary" onClick={async () => {
+          if (taskId) await filesApi.mergeLabelsAfterReview(taskId)
+          setStage('augment')
+        }}>
+          Continue to Augmentation
         </button>
       </div>
     )

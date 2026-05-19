@@ -250,6 +250,21 @@ class VLMBackend(ABC):
         """测试连接，返回 {"success": bool, "message": str}"""
         pass
 
+    @abstractmethod
+    def stream_call_api(
+        self,
+        messages: list,
+        max_tokens: int = 2048,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[list[str]] = None,
+    ):
+        """流式调用 API，yield 每块文本内容。子类应覆盖以支持真正的 SSE 流。"""
+        # 默认实现：一次性调用，按字符yield，模拟打字效果
+        full = self.call_api(messages, max_tokens, temperature, top_p, stop)
+        for ch in full:
+            yield ch
+
     def build_content(self, images_base64: list[str], user_text: str) -> list:
         """构建消息内容（图片+文字）"""
         content = [{"type": "text", "text": user_text}]
@@ -296,6 +311,54 @@ class OpenAICompatibleBackend(VLMBackend):
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
+
+    def stream_call_api(
+        self,
+        messages: list,
+        max_tokens: int = 2048,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[list[str]] = None,
+    ):
+        """流式调用，返回可迭代的文本片段生成器。"""
+        import sse_starlette.sse as _sse_module
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if stop:
+            payload["stop"] = stop
+        with httpx.stream(
+            "POST",
+            f"{self.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=60,
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                content = delta.get("content") or delta.get("text") or ""
+                if content:
+                    yield content
 
     def test_connection(self) -> dict:
         try:
@@ -381,14 +444,9 @@ class AnthropicBackend(VLMBackend):
                 "messages": [{"role": "user", "content": "Hi"}],
                 "max_tokens": 10,
             }
-            headers = {
-                "x-api-key": self.api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            }
             resp = httpx.post(
                 f"{self.base_url}/messages",
-                headers=headers,
+                headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
                 json=payload,
                 timeout=30,
             )
@@ -400,6 +458,69 @@ class AnthropicBackend(VLMBackend):
             return {"success": False, "message": "请求超时"}
         except Exception as e:
             return {"success": False, "message": str(e)[:200]}
+
+    def stream_call_api(
+        self,
+        messages: list,
+        max_tokens: int = 2048,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[list[str]] = None,
+    ):
+        """Anthropic SSE 流式调用。"""
+        system_content = ""
+        user_messages = []
+        for msg in messages:
+            if msg["role"] == "system":
+                system_content = msg["content"]
+            else:
+                user_messages.append(msg)
+
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        payload: dict = {
+            "model": self.model,
+            "messages": user_messages,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        if system_content:
+            payload["system"] = system_content
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if stop:
+            payload["stop_sequences"] = stop
+
+        with httpx.stream(
+            "POST",
+            f"{self.base_url}/messages",
+            headers=headers,
+            json=payload,
+            timeout=60,
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line.startswith("data: "):
+                    continue
+                data_str = line[6:].strip()
+                if data_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                chunk_type = chunk.get("type", "")
+                if chunk_type == "content_block_delta":
+                    delta = chunk.get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        text = delta.get("text", "")
+                        if text:
+                            yield text
 
     def build_content(self, images_base64: list[str], user_text: str) -> list:
         """Anthropic 格式的图片内容"""
@@ -683,7 +804,76 @@ class VLMAdapter:
         data.setdefault("visual_insights", [])
         data.setdefault("special_considerations", [])
 
+        # ── CLIP-friendly 后验证 ────────────────────────────────────────────────
+        # 检查 VLM 输出的 class_name 是否符合 CLIP 要求，不符合则自动修正
+        self._fix_clip_unfriendly_classes(data)
+
         return data
+
+    # ── CLIP-friendly class_name 验证 ───────────────────────────────────────────────
+    # 规则来源：SYSTEM_PROMPT_TEMPLATE 的"类别词的硬纪律"
+    _CLIP_BAD_PATTERNS = re.compile(
+        r"(^(danger|safety|area|zone|violation|fire_event|accident|"
+        r"running|broken|working|active|inactive|normal|abnormal|"
+        r"normal_state|abnormal_state|"
+        r"red|blue|green|yellow|large|small|hot|cold|fast|slow|"
+        r"near|inside|outside|above|below|"
+        r"[\u4e00-\u9fff]+))"  # 任何中文字符
+    )
+    _CLIP_GOOD_FALLBACKS = {
+        "vehicle": "car",
+        "equipment": "forklift",
+        "safety": "hard_hat",
+        "danger": "worker",
+        "area": "car",
+        "zone": "car",
+        "violation": "worker",
+        "running": "person",
+        "broken": "forklift",
+        "working": "forklift",
+        "active": "worker",
+        "inactive": "worker",
+        "normal": "person",
+        "abnormal": "worker",
+    }
+
+    def _fix_clip_unfriendly_classes(self, data: dict) -> None:
+        """检查并修正 class_name 中不符合 CLIP 友好规则的词，自动修复或警告。"""
+        for item in data.get("classes", []):
+            original_name = item.get("class_name", "")
+            warnings: list[str] = []
+
+            # 规则1：包含中文/拼音
+            if re.search(r"[\u4e00-\u9fff]", original_name):
+                warnings.append(f"class_name 包含中文字符（已自动替换）")
+                item["class_name"] = self._CLIP_GOOD_FALLBACKS.get(original_name.lower().replace(" ", "_"), "target")
+                item["prompt"] = original_name
+
+            # 规则2：包含禁用词（抽象/状态/动作）
+            elif self._CLIP_BAD_PATTERNS.match(original_name.lower()):
+                warnings.append(f"class_name 「{original_name}」是抽象词或状态词，CLIP 召回率低（已自动替换）")
+                item["class_name"] = self._CLIP_GOOD_FALLBACKS.get(
+                    original_name.lower().replace(" ", "_"),
+                    original_name.lower().replace(" ", "_")
+                )
+                # 用 prompt 中的具体描述替换
+                item["class_name"] = self._CLIP_GOOD_FALLBACKS.get(
+                    original_name.lower().replace(" ", "_").strip("_"),
+                    "target"
+                )
+
+            # 规则3：超过3个词
+            elif len(original_name.split("_")) > 3:
+                warnings.append(f"class_name 超过3个词（{len(original_name.split('_'))}个），CLIP 泛化能力下降")
+
+            # 规则4：包含空格但不是下划线连接
+            elif " " in original_name and "_" not in original_name:
+                fixed = original_name.replace(" ", "_").lower()
+                warnings.append(f"class_name 包含空格（已自动转为下划线：{fixed}）")
+                item["class_name"] = fixed
+
+            if warnings:
+                item["clip_validation_warnings"] = warnings
 
     def call_with_system_prompt(
         self,
@@ -722,3 +912,20 @@ class VLMAdapter:
     def test_connection(self) -> dict:
         """测试 API 连接"""
         return self.backend.test_connection()
+
+    def stream_call_api(
+        self,
+        messages: list,
+        max_tokens: int = 2048,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[list[str]] = None,
+    ):
+        """流式调用 VLM，返回文本片段生成器"""
+        return self.backend.stream_call_api(
+            messages,
+            max_tokens=max_tokens,
+            temperature=temperature if temperature is not None else self.temperature,
+            top_p=top_p if top_p is not None else self.top_p,
+            stop=stop if stop is not None else self.stop,
+        )

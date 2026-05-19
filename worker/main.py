@@ -732,9 +732,9 @@ async def _handle_command(ws: WebSocket, data: dict):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        task_id = payload.get("task_id") or data.get("task_id", "")
+        task_id = payload.get("task_id", "")
         task_dir = str(_resolve_upload_root() / task_id) if task_id else ""
-        class_names = payload.get("class_names") or data.get("class_names", [])
+        class_names = payload.get("class_names", [])
 
         if not task_dir or not Path(task_dir).exists():
             await _safe_ws_send(ws, {"type": "error", "message": f"Task directory not found: {task_dir}"})
@@ -783,6 +783,8 @@ async def _handle_command(ws: WebSocket, data: dict):
                     task_dir=task_dir,
                     class_names=class_names,
                     progress_callback=_auto_label_progress,
+                    high_conf=payload.get("high_conf", 0.5),
+                    low_conf=payload.get("low_conf", 0.25),
                 ),
             )
 

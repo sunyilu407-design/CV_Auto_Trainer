@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useTaskStore, NegotiationMessage } from '../store/taskStore'
 import { negotiateApi } from '../api/backend'
 
@@ -6,114 +6,311 @@ interface NegotiationChatProps {
   suppressInit?: boolean
 }
 
+// Lightweight inline markdown renderer (no external deps)
+function renderMarkdown(text: string): React.ReactNode[] {
+  const lines = text.split('\n')
+  const elements: React.ReactNode[] = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // Heading
+    if (line.startsWith('### ')) {
+      elements.push(<h4 key={i} style={{ margin: '8px 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--gray-800)' }}>{renderInline(line.slice(4))}</h4>)
+      i++; continue
+    }
+    // Sub-heading
+    if (line.startsWith('## ')) {
+      elements.push(<h3 key={i} style={{ margin: '10px 0 6px', fontSize: 15, fontWeight: 700, color: 'var(--gray-800)' }}>{renderInline(line.slice(3))}</h3>)
+      i++; continue
+    }
+    if (line.startsWith('# ')) {
+      elements.push(<h2 key={i} style={{ margin: '12px 0 6px', fontSize: 16, fontWeight: 700, color: 'var(--gray-800)' }}>{renderInline(line.slice(2))}</h2>)
+      i++; continue
+    }
+
+    // Bullet list
+    if (/^[-\*] /.test(line)) {
+      elements.push(
+        <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 4, paddingLeft: 4 }}>
+          <span style={{ color: '#0a72ef', marginTop: 2, flexShrink: 0 }}>•</span>
+          <span style={{ flex: 1 }}>{renderInline(line.slice(2))}</span>
+        </div>
+      )
+      i++; continue
+    }
+
+    // Numbered list
+    if (/^\d+\. /.test(line)) {
+      const num = line.match(/^(\d+)\. /)?.[1] ?? ''
+      elements.push(
+        <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 4, paddingLeft: 4 }}>
+          <span style={{ color: '#0a72ef', fontWeight: 700, minWidth: 16, flexShrink: 0 }}>{num}.</span>
+          <span style={{ flex: 1 }}>{renderInline(line.replace(/^\d+\. /, ''))}</span>
+        </div>
+      )
+      i++; continue
+    }
+
+    // Blockquote
+    if (line.startsWith('> ')) {
+      elements.push(
+        <div key={i} style={{
+          margin: '4px 0', padding: '6px 12px',
+          borderLeft: '3px solid #0a72ef',
+          background: 'rgba(10,114,239,0.05)',
+          borderRadius: '0 6px 6px 0',
+          color: 'var(--gray-600)', fontSize: 13,
+        }}>
+          {renderInline(line.slice(2))}
+        </div>
+      )
+      i++; continue
+    }
+
+    // Code block marker
+    if (line.startsWith('```')) {
+      const codeLines: string[] = []
+      i++
+      while (i < lines.length && !lines[i].startsWith('```')) {
+        codeLines.push(lines[i])
+        i++
+      }
+      elements.push(
+        <pre key={i} style={{
+          margin: '8px 0', padding: '10px 14px',
+          background: '#1e1e1e', borderRadius: 8,
+          color: '#d4d4d4', fontSize: 12, fontFamily: 'monospace',
+          overflowX: 'auto', whiteSpace: 'pre',
+        }}>
+          {codeLines.join('\n')}
+        </pre>
+      )
+      i++; continue
+    }
+
+    // Empty line
+    if (!line.trim()) {
+      elements.push(<div key={i} style={{ height: 4 }} />)
+      i++; continue
+    }
+
+    // Regular paragraph
+    elements.push(
+      <p key={i} style={{ margin: '2px 0', lineHeight: 1.6 }}>{renderInline(line)}</p>
+    )
+    i++
+  }
+
+  return elements
+}
+
+function renderInline(text: string): React.ReactNode {
+  // Process inline formatting: **bold**, `code`, _italic_
+  const parts: React.ReactNode[] = []
+  let remaining = text
+  let key = 0
+
+  while (remaining) {
+    // Bold
+    const boldMatch = remaining.match(/\*\*(.+?)\*\*/)
+    if (boldMatch && boldMatch.index !== undefined) {
+      if (boldMatch.index > 0) parts.push(<span key={key++}>{remaining.slice(0, boldMatch.index)}</span>)
+      parts.push(<strong key={key++} style={{ fontWeight: 700, color: 'var(--gray-900)' }}>{boldMatch[1]}</strong>)
+      remaining = remaining.slice(boldMatch.index + boldMatch[0].length)
+      continue
+    }
+    // Inline code
+    const codeMatch = remaining.match(/`([^`]+)`/)
+    if (codeMatch && codeMatch.index !== undefined) {
+      if (codeMatch.index > 0) parts.push(<span key={key++}>{remaining.slice(0, codeMatch.index)}</span>)
+      parts.push(<code key={key++} style={{
+        padding: '1px 5px', background: 'rgba(0,0,0,0.06)',
+        borderRadius: 4, fontSize: 12, fontFamily: 'monospace',
+      }}>{codeMatch[1]}</code>)
+      remaining = remaining.slice(codeMatch.index + codeMatch[0].length)
+      continue
+    }
+    // Italic
+    const italicMatch = remaining.match(/_([^_]+)_/)
+    if (italicMatch && italicMatch.index !== undefined) {
+      if (italicMatch.index > 0) parts.push(<span key={key++}>{remaining.slice(0, italicMatch.index)}</span>)
+      parts.push(<em key={key++}>{italicMatch[1]}</em>)
+      remaining = remaining.slice(italicMatch.index + italicMatch[0].length)
+      continue
+    }
+    // No more matches
+    parts.push(<span key={key++}>{remaining}</span>)
+    break
+  }
+
+  return <>{parts}</>
+}
+
+interface StreamBubble {
+  id: string
+  content: string
+  isUser: boolean
+  timestamp: number
+  configUpdated?: boolean
+  converged?: boolean
+  isStreaming?: boolean
+}
+
 export default function NegotiationChat({ suppressInit = false }: NegotiationChatProps) {
   const {
     taskId,
     conversationId,
-    negotiationMessages,
     negotiationConverged,
     setConversationId,
-    addNegotiationMessage,
     setNegotiatedConfig,
     setNegotiationConverged,
     resetNegotiation,
   } = useTaskStore()
 
+  const [streams, setStreams] = useState<StreamBubble[]>([]) // 当前流式气泡列表
   const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const abortRef = useRef<(() => void) | null>(null)
+  const streamIdRef = useRef(0)
 
+  // 滚动到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [negotiationMessages])
+  }, [streams])
 
-  // 首次进入时生成开场白（延迟一帧，等 restore 先执行）
+  // 自动聚焦输入框
   useEffect(() => {
-    if (!taskId || loading || suppressInit) return
-    const timer = setTimeout(() => {
-      // 再次检查，避免和 restore 竞争
-      const msgs = useTaskStore.getState().negotiationMessages
-      if (msgs.length === 0) {
-        handleSend('', true)
-      }
-    }, 100)
-    return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, suppressInit])
+    if (!isLoading) inputRef.current?.focus()
+  }, [isLoading])
+
+  const handleStreamStart = useCallback((text: string, isUser: boolean) => {
+    const id = `stream-${Date.now()}-${streamIdRef.current++}`
+    setStreams(prev => [...prev, {
+      id,
+      content: text,
+      isUser,
+      timestamp: Date.now(),
+      isStreaming: !isUser,
+    }])
+    return id
+  }, [])
+
+  const handleStreamAppend = useCallback((id: string, chunk: string) => {
+    setStreams(prev => prev.map(s =>
+      s.id === id ? { ...s, content: s.content + chunk } : s
+    ))
+  }, [])
+
+  const handleStreamDone = useCallback((id: string, metadata?: { configUpdated?: boolean; converged?: boolean }) => {
+    setStreams(prev => prev.map(s =>
+      s.id === id ? { ...s, isStreaming: false, ...metadata } : s
+    ))
+  }, [])
+
+  // Create empty AI bubble and return its id
+  const startAIStream = useCallback(() => {
+    const id = `stream-${Date.now()}-${streamIdRef.current++}`
+    setStreams(prev => [...prev, {
+      id,
+      content: '',
+      isUser: false,
+      timestamp: Date.now(),
+      isStreaming: true,
+    }])
+    return id
+  }, [])
+
+  // Append text to an existing AI bubble by id
+  const appendToStream = useCallback((id: string, chunk: string) => {
+    setStreams(prev => prev.map(s =>
+      s.id === id ? { ...s, content: s.content + chunk } : s
+    ))
+  }, [])
+
+  // Mark stream as done with optional metadata
+  const finishStream = useCallback((id: string, meta?: { configUpdated?: boolean; converged?: boolean }) => {
+    setStreams(prev => prev.map(s =>
+      s.id === id ? { ...s, isStreaming: false, ...meta } : s
+    ))
+  }, [])
+
+  const startStream = useCallback((message: string, isInitial = false) => {
+    if (!taskId) return
+
+    // Cancel previous stream
+    abortRef.current?.()
+    setError(null)
+    setIsLoading(true)
+
+    // Add user message bubble immediately
+    handleStreamStart(message, true)
+
+    // Add empty AI bubble immediately (before any chunk arrives)
+    const aiBubbleId = startAIStream()
+
+    const cleanup = negotiateApi.streamChat({
+      task_id: taskId,
+      message: isInitial ? '__INIT__' : message,
+      conversation_id: conversationId,
+      include_initial: isInitial || streams.length === 0,
+    }, {
+      onChunk: (chunk) => {
+        appendToStream(aiBubbleId, chunk)
+      },
+      onDone: (data) => {
+        // Update conversation ID
+        if (data.conversation_id && data.conversation_id !== conversationId) {
+          setConversationId(data.conversation_id)
+        }
+        finishStream(aiBubbleId, {
+          configUpdated: data.updated_config != null,
+          converged: data.convergence?.converged,
+        })
+        if (data.updated_config) {
+          setNegotiatedConfig(data.updated_config as any)
+        }
+        setNegotiationConverged(data.convergence?.converged ?? false)
+        setIsLoading(false)
+        abortRef.current = null
+      },
+      onError: (err) => {
+        setError(err.message || '对话请求失败，请重试')
+        finishStream(aiBubbleId)
+        setIsLoading(false)
+        abortRef.current = null
+      },
+    })
+
+    abortRef.current = cleanup
+  }, [taskId, conversationId, streams.length, handleStreamStart, startAIStream, appendToStream, finishStream, setConversationId, setNegotiatedConfig, setNegotiationConverged])
 
   async function handleSend(message?: string, isInitial = false) {
     const text = message ?? input.trim()
     if (!text && !isInitial) return
     if (!taskId) return
 
-    setError(null)
-    setLoading(true)
-
-    // 用户消息
-    if (text && !isInitial) {
-      const userMsg: NegotiationMessage = {
-        role: 'user',
-        content: text,
-        timestamp: Date.now(),
-      }
-      addNegotiationMessage(userMsg)
-      setInput('')
-    }
-
-    try {
-      const resp = await negotiateApi.chat({
-        task_id: taskId,
-        message: isInitial ? '__INIT__' : text,
-        conversation_id: conversationId,
-        include_initial: isInitial || negotiationMessages.length === 0,
-      })
-
-      // 更新 conversation ID
-      if (resp.conversation_id && resp.conversation_id !== conversationId) {
-        setConversationId(resp.conversation_id)
-      }
-
-      // AI 回复
-      const aiMsg: NegotiationMessage = {
-        role: 'assistant',
-        content: resp.reply,
-        timestamp: Date.now(),
-        metadata: {
-          should_preview: resp.should_preview,
-          config_updated: resp.updated_config !== null,
-          converged: resp.convergence.converged,
-        },
-      }
-      addNegotiationMessage(aiMsg)
-
-      // 更新配置
-      if (resp.updated_config) {
-        setNegotiatedConfig(resp.updated_config as any)
-      }
-
-      // 更新收敛状态
-      setNegotiationConverged(resp.convergence.converged)
-    } catch (err: any) {
-      setError(err?.message || '对话请求失败，请重试')
-    } finally {
-      setLoading(false)
-    }
+    setInput('')
+    startStream(text, isInitial)
   }
 
   async function handleReset() {
     if (!taskId) return
     if (!confirm('确定要重新开始对话吗？当前对话内容将被清除。')) return
-    setLoading(true)
+    abortRef.current?.()
+    setStreams([])
+    setIsLoading(false)
+    setError(null)
     try {
       await negotiateApi.reset(taskId)
       resetNegotiation()
-      // 重新触发开场白
-      setTimeout(() => handleSend('', true), 200)
+      setTimeout(() => startStream('', true), 200)
     } catch (err: any) {
       setError(err?.message || '重置失败')
-      setLoading(false)
     }
   }
 
@@ -123,6 +320,8 @@ export default function NegotiationChat({ suppressInit = false }: NegotiationCha
       handleSend()
     }
   }
+
+  const hasMessages = streams.length > 0
 
   return (
     <div
@@ -149,12 +348,32 @@ export default function NegotiationChat({ suppressInit = false }: NegotiationCha
           gap: 8,
         }}
       >
-        <span style={{ fontSize: 16 }}>💬</span>
-        需求确认助手
-        {negotiationMessages.length > 0 && (
+        <div style={{
+          width: 28, height: 28, borderRadius: '50%',
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: '#fff', fontSize: 12, fontWeight: 700, flexShrink: 0,
+        }}>
+          AI
+        </div>
+        <span>需求确认助手</span>
+
+        {isLoading && (
+          <div style={{
+            marginLeft: 8, display: 'flex', alignItems: 'center', gap: 4,
+            fontSize: 11, color: '#0a72ef', fontWeight: 500,
+          }}>
+            <span className="typing-dot" />
+            <span className="typing-dot" style={{ animationDelay: '0.2s' }} />
+            <span className="typing-dot" style={{ animationDelay: '0.4s' }} />
+            <span>生成中</span>
+          </div>
+        )}
+
+        {hasMessages && (
           <button
             onClick={handleReset}
-            disabled={loading}
+            disabled={isLoading}
             style={{
               marginLeft: 'auto',
               padding: '2px 10px',
@@ -163,13 +382,15 @@ export default function NegotiationChat({ suppressInit = false }: NegotiationCha
               background: '#fff',
               color: 'var(--gray-500)',
               fontSize: 11,
-              cursor: loading ? 'not-allowed' : 'pointer',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              opacity: isLoading ? 0.5 : 1,
             }}
             title="清除当前对话，重新开始"
           >
             重新开始
           </button>
         )}
+
         {negotiationConverged && (
           <span
             style={{
@@ -198,37 +419,74 @@ export default function NegotiationChat({ suppressInit = false }: NegotiationCha
           gap: 12,
         }}
       >
-        {negotiationMessages.map((msg, idx) => (
-          <MessageBubble key={idx} message={msg} />
+        {/* Welcome state */}
+        {!hasMessages && !isLoading && (
+          <div style={{
+            flex: 1, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            gap: 12, padding: '32px 0',
+            color: 'var(--gray-400)',
+          }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: '50%',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 22, color: '#fff', boxShadow: '0 4px 12px rgba(102,126,234,0.3)',
+            }}>
+              🤖
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-600)', margin: '0 0 4px' }}>
+                AI 需求确认助手
+              </p>
+              <p style={{ fontSize: 12, color: 'var(--gray-400)', margin: 0 }}>
+                正在连接…
+              </p>
+            </div>
+          </div>
+        )}
+
+        {streams.map((msg) => (
+          <MessageBubble key={msg.id} message={msg} />
         ))}
 
-        {loading && (
-          <div
-            style={{
+        {/* Loading indicator */}
+        {isLoading && (
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: '#fff', fontSize: 10, fontWeight: 700,
+            }}>
+              AI
+            </div>
+            <div style={{
+              padding: '10px 14px',
+              borderRadius: '12px 12px 12px 2px',
+              background: 'var(--gray-50)',
+              border: '1px solid var(--gray-100)',
               display: 'flex',
+              gap: 4,
               alignItems: 'center',
-              gap: 6,
-              padding: '8px 12px',
-              color: 'var(--gray-400)',
-              fontSize: 12,
-            }}
-          >
-            <span className="loading-dots">AI 思考中</span>
-            <span style={{ animation: 'pulse 1.5s ease-in-out infinite' }}>...</span>
+            }}>
+              <span className="thinking-dot" />
+              <span className="thinking-dot" style={{ animationDelay: '0.15s' }} />
+              <span className="thinking-dot" style={{ animationDelay: '0.3s' }} />
+            </div>
           </div>
         )}
 
         {error && (
-          <div
-            style={{
-              padding: '8px 12px',
-              background: 'rgba(239,68,68,0.05)',
-              borderRadius: 8,
-              color: '#dc2626',
-              fontSize: 12,
-            }}
-          >
-            {error}
+          <div style={{
+            padding: '10px 14px',
+            background: 'rgba(239,68,68,0.06)',
+            borderRadius: 8,
+            color: '#dc2626',
+            fontSize: 12,
+            border: '1px solid rgba(239,68,68,0.15)',
+          }}>
+            <strong>错误：</strong>{error}
           </div>
         )}
 
@@ -250,8 +508,8 @@ export default function NegotiationChat({ suppressInit = false }: NegotiationCha
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="描述您的需求，或回复 AI 的问题..."
-          disabled={loading}
+          placeholder="描述您的需求，或回复 AI 的问题…"
+          disabled={isLoading}
           rows={1}
           style={{
             flex: 1,
@@ -265,69 +523,138 @@ export default function NegotiationChat({ suppressInit = false }: NegotiationCha
             minHeight: 36,
             maxHeight: 100,
             overflow: 'auto',
+            transition: 'border-color 0.15s',
           }}
+          onFocus={(e) => (e.target.style.borderColor = '#0a72ef')}
+          onBlur={(e) => (e.target.style.borderColor = 'var(--gray-200)')}
         />
         <button
           onClick={() => handleSend()}
-          disabled={loading || !input.trim()}
+          disabled={isLoading || !input.trim()}
           style={{
             padding: '8px 16px',
             borderRadius: 8,
             border: 'none',
-            background: loading || !input.trim() ? 'var(--gray-200)' : '#0a72ef',
-            color: loading || !input.trim() ? 'var(--gray-400)' : '#fff',
+            background: isLoading || !input.trim() ? 'var(--gray-200)' : '#0a72ef',
+            color: isLoading || !input.trim() ? 'var(--gray-400)' : '#fff',
             fontSize: 13,
             fontWeight: 600,
-            cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
+            cursor: isLoading || !input.trim() ? 'not-allowed' : 'pointer',
             whiteSpace: 'nowrap',
+            transition: 'background 0.15s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
           }}
         >
-          发送
+          {isLoading ? (
+            <>
+              <span className="mini-spinner" />
+              生成中
+            </>
+          ) : '发送'}
         </button>
       </div>
     </div>
   )
 }
 
-function MessageBubble({ message }: { message: NegotiationMessage }) {
-  const isUser = message.role === 'user'
+function MessageBubble({ message }: { message: StreamBubble }) {
+  const isUser = message.isUser
 
   return (
     <div
       style={{
         display: 'flex',
         justifyContent: isUser ? 'flex-end' : 'flex-start',
+        alignItems: 'flex-end',
+        gap: 8,
       }}
     >
+      {!isUser && (
+        <div style={{
+          width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: '#fff', fontSize: 10, fontWeight: 700,
+        }}>
+          AI
+        </div>
+      )}
+
       <div
         style={{
-          maxWidth: '85%',
+          maxWidth: '82%',
           padding: '10px 14px',
-          borderRadius: isUser ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-          background: isUser ? '#0a72ef' : 'var(--gray-50)',
+          borderRadius: isUser
+            ? '16px 16px 4px 16px'
+            : '16px 16px 16px 4px',
+          background: isUser
+            ? 'linear-gradient(135deg, #0a72ef 0%, #0057d9 100%)'
+            : '#fff',
+          border: isUser ? 'none' : '1px solid var(--gray-100)',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
           color: isUser ? '#fff' : 'var(--gray-800)',
           fontSize: 13,
-          lineHeight: '1.5',
-          whiteSpace: 'pre-wrap',
+          lineHeight: '1.6',
           wordBreak: 'break-word',
+          position: 'relative',
         }}
       >
-        {message.content}
-        {message.metadata?.config_updated && (
-          <div
-            style={{
-              marginTop: 6,
-              padding: '4px 8px',
-              background: isUser ? 'rgba(255,255,255,0.15)' : 'rgba(10,114,239,0.08)',
-              borderRadius: 4,
-              fontSize: 11,
-              color: isUser ? 'rgba(255,255,255,0.8)' : '#0a72ef',
-            }}
-          >
-            ✦ 配置已更新
+        {/* Streaming cursor */}
+        {message.isStreaming && (
+          <span style={{
+            display: 'inline-block',
+            width: 2, height: 14,
+            background: isUser ? '#fff' : '#0a72ef',
+            marginLeft: 2,
+            verticalAlign: 'text-bottom',
+            animation: 'blink 0.8s ease-in-out infinite',
+          }} />
+        )}
+
+        {renderMarkdown(message.content)}
+
+        {/* Config badge */}
+        {message.configUpdated && !message.isStreaming && (
+          <div style={{
+            marginTop: 8,
+            padding: '4px 8px',
+            background: isUser ? 'rgba(255,255,255,0.15)' : 'rgba(10,114,239,0.08)',
+            borderRadius: 4,
+            fontSize: 11,
+            color: isUser ? 'rgba(255,255,255,0.85)' : '#0a72ef',
+            fontWeight: 500,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+          }}>
+            <span>✦</span>
+            <span>检测配置已更新</span>
           </div>
         )}
+
+        {/* Time */}
+        <div style={{
+          marginTop: 4,
+          fontSize: 10,
+          color: isUser ? 'rgba(255,255,255,0.5)' : 'var(--gray-300)',
+          textAlign: 'right',
+        }}>
+          {new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+        </div>
       </div>
+
+      {isUser && (
+        <div style={{
+          width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+          background: 'linear-gradient(135deg, #11998e 0%, #0a72ef 100%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: '#fff', fontSize: 10, fontWeight: 700,
+        }}>
+          U
+        </div>
+      )}
     </div>
   )
 }

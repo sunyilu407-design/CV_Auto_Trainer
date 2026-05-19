@@ -1353,6 +1353,50 @@ TrainConfig 页面（incrementalMode=true）
 | 误检率高 | CLIP 词汇太泛化 | C · 细化类别定义 |
 | 新增检测类别 | 业务扩展 | C · 扩充类别 |
 
+### 7.6.5 种子训练（Snowball / Seed Training）细节
+
+#### 7.6.5.1 三路标注合并逻辑
+
+种子训练过程中，标注来源分为三路，按优先级合并：
+
+| 优先级 | 来源 | 说明 |
+|--------|------|------|
+| 1（最高） | `seed_labels/` | 用户手动标注的种子图片 |
+| 2 | `review_labels/` | 种子模型推理后，用户审核采纳的标注 |
+| 3 | `auto_labels/` | 种子模型推理后，高置信度自动采纳的标注 |
+
+合并函数：`worker/pipeline/seed_auto_labeler.py::merge_seed_and_auto_labels()`
+
+审核完成后，前端调用 `POST /api/files/{task_id}/merge-labels` 重新执行合并，
+将结果写入 `labeled_images/` + `labels/` 目录，供后续 augment / training 流程使用。
+
+#### 7.6.5.2 置信度阈值可配置
+
+种子模型自动标注时的置信度阈值现在可在 UI 中调节：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `high_conf`（自动采纳） | 0.5 | ≥ 此阈值的框直接采纳到 `auto_labels/` |
+| `low_conf`（待审核） | 0.25 | ≥ 此阈值但 < high_conf 的框保存到 `review_labels/` |
+
+参数通过 `start_seed_training` WebSocket 消息的 `payload` 传给 Worker：
+```json
+{ "type": "start_seed_training", "payload": { "task_id": "...", "class_names": [...], "high_conf": 0.5, "low_conf": 0.25 } }
+```
+
+#### 7.6.5.3 CLIP-Friendly class_name 后验证
+
+VLM 输出的 `class_name` 经过 `_fix_clip_unfriendly_classes()` 自动检查并修正：
+
+| 规则 | 检测条件 | 动作 |
+|------|---------|------|
+| 中文字符 | 包含 Unicode 中文字符 | 自动替换为 CLIP-friendly 等价词 |
+| 禁用词 | 抽象/状态/动作词（danger/safety/running/broken 等） | 自动替换 |
+| 多词超限 | 超过 3 个下划线分隔词 | 警告 |
+| 空格分隔 | 包含空格但无下划线 | 自动转为下划线连接 |
+
+所有修正记录在 `clip_validation_warnings` 字段，供前端展示。
+
 ---
 
 ## 8. 阶段四：模型训练（本地 GPU / 云端服务器）
