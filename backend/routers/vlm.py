@@ -83,7 +83,7 @@ def update_vlm_result(
     db: Session = Depends(get_db),
 ):
     task = get_task_for_user(db, task_id, current_user)
-    task.vlm_result = payload.get("classes")
+    task.vlm_result = payload.get("data", {}).get("classes") if isinstance(payload.get("data"), dict) else payload.get("classes")
 
     # VLM 结果更新 → 自动清理旧的未确认对话，确保协商阶段重新开始
     from models.db import NegotiationConversation

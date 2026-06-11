@@ -115,9 +115,9 @@ class LocalTrainer:
                 if not last_line:
                     continue
                 parts = last_line.split(",")
-                if len(parts) > 3:
+                if len(parts) > 6:
                     current_epoch = int(parts[0].strip())
-                    current_map = float(parts[3].strip())
+                    current_map = float(parts[6].strip())
                     if progress_callback:
                         progress_callback({
                             "current_epoch": current_epoch,
@@ -143,8 +143,11 @@ class LocalTrainer:
     def _read_final_map(self) -> float | None:
         """
         从 results.csv 最后一行读取 best mAP50 值。
-        Ultralytics results.csv 列顺序：epoch, train/box_loss, train/cls_loss, ...
-        val/mAP50(B) 在第 4 列（index 3）
+        Ultralytics results.csv 列（YOLO11, approximate order）：
+          0=epoch, 1=train/box_loss, 2=train/cls_loss, 3=train/dfl_loss,
+          4=metrics/precision(B), 5=metrics/recall(B), 6=metrics/mAP50(B),
+          7=metrics/mAP50-95(B)
+        改用 header 查找而非固定 index，避免版本间列顺序差异导致读错。
         """
         results_csv = self._output_dir / "results.csv"
         if not results_csv.exists():
@@ -152,14 +155,21 @@ class LocalTrainer:
         try:
             with open(results_csv, encoding="utf-8") as f:
                 lines = f.readlines()
-            for line in reversed(lines):
+            if not lines:
+                return None
+            header = lines[0].strip().split(",")
+            try:
+                map50_col = header.index("metrics/mAP50(B)")
+            except ValueError:
+                return None
+            for line in reversed(lines[1:]):
                 stripped = line.strip()
-                if not stripped or stripped.startswith("epoch"):
+                if not stripped:
                     continue
                 parts = stripped.split(",")
-                if len(parts) >= 4:
+                if len(parts) > map50_col:
                     try:
-                        return float(parts[3].strip())
+                        return float(parts[map50_col].strip())
                     except ValueError:
                         continue
         except OSError:

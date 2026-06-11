@@ -99,9 +99,12 @@ class CloudTrainer(ABC):
         progress_callback: Optional[Callable] = None,
     ) -> dict:
         """
-        完整云端训练流水线。finally 块保证无论如何都执行关机。
+        完整云端训练流水线。finally 块保证无论如何都执行关机，
+        且关机失败不会掩盖训练阶段的原始异常。
         返回：{best_pt_path, last_pt_path, metrics, export_paths}
         """
+        primary_exc: BaseException | None = None
+        shutdown_exc: BaseException | None = None
         try:
             self.connect()
             zip_path = self._pack_dataset(dataset_dir)
@@ -109,10 +112,16 @@ class CloudTrainer(ABC):
             self.run_training(train_config, progress_callback)
             artifacts = self.pull_artifacts(train_config)
             return artifacts
-        except Exception:
+        except BaseException as e:
+            primary_exc = e
             raise
         finally:
-            self.shutdown()
+            try:
+                self.shutdown()
+            except BaseException as s:
+                shutdown_exc = s
+            if primary_exc is not None and shutdown_exc is not None:
+                raise primary_exc from shutdown_exc
 
     def _pack_dataset(self, dataset_dir: str) -> str:
         """打包数据集为 zip"""

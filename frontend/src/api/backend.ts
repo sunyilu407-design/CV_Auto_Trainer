@@ -489,6 +489,8 @@ export const negotiateApi = {
     onChunk: (text: string) => void
     onDone: (data: NegotiateChatResponse & { type: 'done' }) => void
     onError: (err: Error) => void
+    /** SSE 连接建立后立即触发（在任何 text 之前），可用于切换 loading 状态 */
+    onStatus?: (state: string) => void
   }): () => void => {
     const baseUrl = (window as any).__API_BASE_URL__ || ''
     const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
@@ -496,10 +498,12 @@ export const negotiateApi = {
     const url = `${protocol}//${host}/api/negotiate/chat/stream`
 
     const abortController = new AbortController()
+    const authToken = useAuthStore.getState().token
+    const authHeader: HeadersInit = authToken ? { Authorization: `Bearer ${authToken}` } : {}
 
     fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeader },
       body: JSON.stringify(payload),
       signal: abortController.signal,
       credentials: 'include',
@@ -519,31 +523,62 @@ export const negotiateApi = {
 
         buffer += decoder.decode(value, { stream: true })
 
-        // SSE 解析：按事件分隔
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''  // 不完整的行保留到下次
+        // SSE 事件以两个换行 \n\n 结束，逐事件处理
+        let eventStart = 0
+        while (true) {
+          const eventSep = buffer.indexOf('\n\n', eventStart)
+          if (eventSep === -1) break  // 没有完整事件
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const raw = line.slice(6).trim()
-            if (!raw) continue
-            try {
-              const data = JSON.parse(raw)
-              if (data.type === 'text') {
-                opts.onChunk(data.content)
-              } else if (data.type === 'done' || data.type === 'error') {
-                if (data.type === 'done') {
-                  opts.onDone({ ...data, type: 'done' } as any)
-                } else {
-                  opts.onError(new Error(data.message || 'Stream error'))
-                }
-                return
-              }
-            } catch {
-              // ignore parse errors
+          const eventBlock = buffer.slice(eventStart, eventSep)
+          eventStart = eventSep + 2
+
+          let eventData = ''
+
+          for (const line of eventBlock.split('\n')) {
+            if (line.startsWith('data:')) {
+              eventData += (eventData ? '\n' : '') + line.slice(6)
             }
+            // 忽略其他行（包括 event: 行）
+          }
+
+          if (!eventData) continue
+
+          try {
+            const data = JSON.parse(eventData)
+            if (data.type === 'status') {
+              opts.onStatus?.(data.state)
+            } else if (data.type === 'text') {
+              const content = data.content
+              // 防护：如果 content 看起来是整个 JSON 响应（包含 reply/intent_update 等字段），
+              // 尝试提取其中的 reply 字段作为显示文本
+              if (content && typeof content === 'string' && content.trim().startsWith('{')) {
+                try {
+                  const parsed = JSON.parse(content)
+                  // 如果是完整的 AI 响应 JSON，提取 reply 字段
+                  if (parsed.reply && typeof parsed.reply === 'string') {
+                    opts.onChunk(parsed.reply)
+                    continue
+                  }
+                } catch {
+                  // 不是 JSON，保持原样
+                }
+              }
+              opts.onChunk(content)
+            } else if (data.type === 'done' || data.type === 'error') {
+              if (data.type === 'done') {
+                opts.onDone({ ...data, type: 'done' } as any)
+              } else {
+                opts.onError(new Error(data.message || 'Stream error'))
+              }
+              return
+            }
+          } catch {
+            // 忽略解析错误
           }
         }
+
+        // 保留不完整的事件数据
+        buffer = buffer.slice(eventStart)
       }
     }).catch((err) => {
       if (err.name !== 'AbortError') {
@@ -609,6 +644,94 @@ export const negotiateApi = {
     request<{ deleted: number }>(`/negotiate/reset/${taskId}`, {
       method: 'DELETE',
     }),
+
+  generateConfig: (payload: {
+    task_id: string
+    conversation_id: string
+  }, opts: {
+    onProgress: (data: { step: number; message: string }) => void
+    onDone: (data: {
+      conversation_id: string
+      updated_config: any
+      converged: boolean
+      reply: string
+    }) => void
+    onError: (err: Error) => void
+  }): (() => void) => {
+    const baseUrl = (window as any).__API_BASE_URL__ || ''
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
+    const host = baseUrl || window.location.host
+    const url = `${protocol}//${host}/api/negotiate/generate-config`
+
+    const abortController = new AbortController()
+    const authToken = useAuthStore.getState().token
+    const authHeader: HeadersInit = authToken ? { Authorization: `Bearer ${authToken}` } : {}
+
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeader },
+      body: JSON.stringify(payload),
+      signal: abortController.signal,
+      credentials: 'include',
+    }).then(async (resp) => {
+      if (!resp.ok) {
+        const text = await resp.text()
+        opts.onError(new Error(`HTTP ${resp.status}: ${text}`))
+        return
+      }
+      const reader = resp.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        let eventStart = 0
+        while (true) {
+          const eventSep = buffer.indexOf('\n\n', eventStart)
+          if (eventSep === -1) break
+
+          const eventBlock = buffer.slice(eventStart, eventSep)
+          eventStart = eventSep + 2
+
+          let eventData = ''
+          for (const line of eventBlock.split('\n')) {
+            if (line.startsWith('data:')) {
+              eventData = line.slice(5).trim()
+              break
+            }
+          }
+
+          if (!eventData) continue
+
+          try {
+            const data = JSON.parse(eventData)
+            if (data.step !== undefined) {
+              opts.onProgress(data)
+            } else if (data.type === 'done') {
+              opts.onDone(data)
+              return
+            } else if (data.type === 'error') {
+              opts.onError(new Error(data.message || 'Generation failed'))
+              return
+            }
+          } catch {
+            // ignore
+          }
+        }
+        buffer = buffer.slice(eventStart)
+      }
+    }).catch((err) => {
+      if (err.name !== 'AbortError') {
+        opts.onError(err)
+      }
+    })
+
+    return () => abortController.abort()
+  },
 }
 
 export const algorithmApi = {

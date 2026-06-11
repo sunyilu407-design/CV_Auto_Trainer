@@ -65,7 +65,7 @@ export default function TrainingMonitor() {
           }
           if (status.state === 'done') {
             clearInterval(poll)
-            setStage('video_inference')
+            setStage('delivery')
           }
         } catch {
           // ignore

@@ -151,40 +151,48 @@ class NegotiationOrchestrator:
 
         import time as _time
 
-        # 2. 首轮优化：跳过 Agent A + Agent B，直接用结构化开场白
-        #    响应 <1s，配置留到用户回复后再生成
+        # 2. 首轮优化：调用 Agent A 生成智能开场白
+        #    基于用户已说的内容，智能生成追问（不重复用户已说的）
         if is_first and initial_understanding:
-            classes = initial_understanding.get("classes", [])
+            _t0 = _time.monotonic()
+            classes = initial_understanding.get("classes", []) or []
             target_names = [
                 c.get("display_name_zh") or c.get("class_name", "")
-                for c in classes if c.get("display_name_zh") or c.get("class_name")
+                for c in classes if c and isinstance(c, dict) and (c.get("display_name_zh") or c.get("class_name"))
             ]
             targets_str = "、".join(target_names) if target_names else "目标"
-            structured_reply = (
-                f"你好！根据你上传的图片和需求描述，"
-                f"我理解你需要检测以下目标：**{targets_str}**。\n\n"
-                f"在为你生成检测配置之前，我需要确认几个问题：\n\n"
-                f"1. 除了{targets_str}，还有其他需要检测的对象吗？\n"
-                f"2. 检测到这些目标后，需要触发什么动作或告警吗？\n"
-                f"3. 有什么情况下出现的{targets_str}不需要检测？（排除条件）\n\n"
-                f"请直接回复你的补充说明，或者输入「没有其他要求」让我直接生成配置。"
+
+            # 构建首轮 prompt：用户已说的内容 + 明确要求智能生成
+            user_context = (
+                f"用户已明确说明的内容：\n"
+                f"- 检测目标：{targets_str}\n"
+                f"- 用户原始需求：{user_description or '无'}\n\n"
+                f"重要：你必须基于以上内容，用简洁自然的方式开场。不要问用户已经说过的问题，"
+                f"而是追问用户还没有提到的关键维度（如：告警方式、排除场景、精度要求等）。"
             )
-            agent_a_response = ConversationResponse(
-                reply=structured_reply,
-                should_regenerate=False,
-                should_preview=False,
-                converged=False,
-                missing=["待确认事件/告警", "待确认排除条件"],
+
+            # 调用 Agent A 生成智能开场白
+            agent_a_response = self.agent_a.chat(
+                user_message=user_context,
+                conversation_history=[],
+                initial_understanding=initial_understanding,
+                current_config_summary=None,
+                preview_stats=None,
+                sample_images_base64=sample_images_base64,
+                is_first_message=True,
             )
-            # 首轮就用 VLM parse 生成基础配置，前端立即可展示
+            logger.info(
+                "First turn Agent A done in %.1fs: reply_len=%d, should_regen=%s, converged=%s",
+                _time.monotonic() - _t0,
+                len(agent_a_response.reply),
+                agent_a_response.should_regenerate,
+                agent_a_response.converged,
+            )
+
+            # 生成基础配置
             updated_config = self._fallback_config_from_vlm(initial_understanding)
             conv.current_config = updated_config
             conv.algorithm_hints = updated_config.get("algorithm_hints")
-            logger.info(
-                "First turn: structured opening + fallback config (from VLM parse %d classes), "
-                "no LLM call (<1s)",
-                len(classes),
-            )
 
         else:
             # 非首轮：调用 Agent A（始终传入 initial_understanding + user_description）
@@ -238,6 +246,36 @@ class NegotiationOrchestrator:
                 "content": message,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
+
+        # 强制收敛：当用户明确要求直接生成配置时，强制收敛
+        force_converge_keywords = [
+            "直接生成", "直接生成配置", "跳过追问", "不需要追问了",
+            "可以了", "没问题", "就这样", "确认", "开始训练"
+        ]
+        force_converged = (
+            message and any(kw in message for kw in force_converge_keywords)
+        )
+        final_converged = force_converged or agent_a_response.converged
+
+        # 强制收敛时，调用 Agent B 生成最终配置
+        if force_converged and agent_a_response.intent_update and updated_config is None:
+            try:
+                context = self._build_conversation_context(conv.messages or [], message)
+                if user_description:
+                    context = f"用户原始需求描述：{user_description}\n\n{context}"
+                updated_config = self.agent_b.generate_config(
+                    intent_summary=agent_a_response.intent_update,
+                    conversation_context=context,
+                )
+                conv.current_config = updated_config
+                conv.algorithm_hints = updated_config.get("algorithm_hints")
+                logger.info("Force converged: Agent B generated final config")
+            except Exception as exc:
+                logger.warning("Force converge Agent B config generation failed: %s", exc)
+                if initial_understanding:
+                    updated_config = self._fallback_config_from_vlm(initial_understanding)
+                    conv.current_config = updated_config
+
         messages.append({
             "role": "assistant",
             "content": agent_a_response.reply,
@@ -245,7 +283,7 @@ class NegotiationOrchestrator:
             "metadata": {
                 "should_regenerate": agent_a_response.should_regenerate,
                 "should_preview": agent_a_response.should_preview,
-                "converged": agent_a_response.converged,
+                "converged": final_converged,
                 "config_updated": updated_config is not None,
             },
         })
@@ -265,8 +303,8 @@ class NegotiationOrchestrator:
             reply=agent_a_response.reply,
             updated_config=updated_config,
             should_preview=agent_a_response.should_preview,
-            converged=agent_a_response.converged,
-            missing=agent_a_response.missing,
+            converged=final_converged,
+            missing=agent_a_response.missing if not force_converged else [],
         )
 
     def confirm(self, task_id: str, conversation_id: str) -> Dict[str, Any]:
@@ -372,7 +410,7 @@ class NegotiationOrchestrator:
         Agent B 失败时的兜底：直接把 VLM parse 的 classes 包装为初始配置。
         不如 Agent B 生成的完整（缺少 vocab/algorithm_hints），但至少能显示正确的类别。
         """
-        classes = initial_understanding.get("classes", [])
+        classes = initial_understanding.get("classes", []) or []
         return {
             "classes": classes,
             "detection_rules": {
@@ -381,9 +419,9 @@ class NegotiationOrchestrator:
                 "post_filters": [{"type": "min_area", "value": 0.001, "unit": "relative"}],
             },
             "vocab": {
-                cls.get("class_name", f"class_{i}"): {
-                    "primary": cls.get("prompt", ""),
-                    "aliases": cls.get("prompt_aliases", []),
+                cls.get("class_name", f"class_{i}") if cls and isinstance(cls, dict) else f"class_{i}": {
+                    "primary": cls.get("prompt", "") if cls and isinstance(cls, dict) else "",
+                    "aliases": cls.get("prompt_aliases", []) if cls and isinstance(cls, dict) else [],
                     "context_anchors": [],
                 }
                 for i, cls in enumerate(classes)
@@ -400,12 +438,14 @@ class NegotiationOrchestrator:
         从 VLM parse 的可靠结果构建 intent_summary 给 Agent B。
         首轮使用：确保 Agent B 配置基于真实 VLM 结果，不走 Agent A 可能偏差的输出。
         """
-        classes = initial_understanding.get("classes", [])
+        classes = initial_understanding.get("classes", []) or []
         targets = []
         for cls in classes:
+            if not cls or not isinstance(cls, dict):
+                continue
             target = {
-                "name": cls.get("display_name_zh") or cls.get("class_name", ""),
-                "description": cls.get("display_prompt_zh") or cls.get("prompt", ""),
+                "name": cls.get("display_name_zh") or cls.get("class_name", "") or "",
+                "description": cls.get("display_prompt_zh") or cls.get("prompt", "") or "",
             }
             color = cls.get("display_color_hint_zh") or cls.get("color_hint", "")
             if color:
@@ -426,20 +466,22 @@ class NegotiationOrchestrator:
         return intent
 
     @staticmethod
-    def _summarize_config(config: Dict[str, Any]) -> str:
+    def _summarize_config(config: Optional[Dict[str, Any]]) -> str:
         """简要摘要当前配置，供 Agent A 参考"""
+        if not config:
+            return "无"
         parts = []
-        classes = config.get("classes", [])
+        classes = config.get("classes", []) or []
         if classes:
-            names = [c.get("display_name_zh") or c.get("class_name", "") for c in classes]
+            names = [c.get("display_name_zh") or c.get("class_name", "") for c in classes if c and isinstance(c, dict)]
             parts.append(f"检测目标: {', '.join(names)}")
 
         hints = config.get("algorithm_hints", {})
-        if hints.get("scenario_type"):
+        if hints and isinstance(hints, dict) and hints.get("scenario_type"):
             parts.append(f"场景: {hints['scenario_type']}")
-        events = hints.get("events", [])
+        events = hints.get("events", []) if hints and isinstance(hints, dict) else []
         if events:
-            event_names = [e.get("name_zh", "") for e in events]
+            event_names = [e.get("name_zh", "") for e in events if e and isinstance(e, dict)]
             parts.append(f"事件: {', '.join(event_names)}")
 
         rules = config.get("detection_rules", {})
@@ -453,9 +495,11 @@ class NegotiationOrchestrator:
         history: List[Dict[str, Any]], current_message: str
     ) -> str:
         """构建精简对话上下文给 Agent B"""
+        if not history:
+            return f"用户对话摘要：\n- {current_message}"
         # 最近 5 轮用户消息作为上下文
         user_msgs = [
-            m["content"] for m in history if m.get("role") == "user"
+            m["content"] for m in history if m and m.get("role") == "user"
         ][-5:]
         user_msgs.append(current_message)
         return "用户对话摘要：\n" + "\n".join(f"- {m}" for m in user_msgs)

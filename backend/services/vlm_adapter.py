@@ -320,8 +320,7 @@ class OpenAICompatibleBackend(VLMBackend):
         top_p: Optional[float] = None,
         stop: Optional[list[str]] = None,
     ):
-        """流式调用，返回可迭代的文本片段生成器。"""
-        import sse_starlette.sse as _sse_module
+        """同步生成器，yield 每块文本。"""
         payload: dict = {
             "model": self.model,
             "messages": messages,
@@ -785,6 +784,8 @@ class VLMAdapter:
             data["confidence"] = max(0.0, min(1.0, float(confidence)))
 
         for item in data.get("classes", []):
+            if not item or not isinstance(item, dict):
+                continue
             item["display_name_zh"] = item.get("display_name_zh") or item.get("class_name") or ""
             item["display_prompt_zh"] = item.get("display_prompt_zh") or item.get("prompt") or ""
             item["display_negative_prompt_zh"] = item.get("display_negative_prompt_zh") or item.get("negative_prompt") or ""
@@ -840,7 +841,9 @@ class VLMAdapter:
     def _fix_clip_unfriendly_classes(self, data: dict) -> None:
         """检查并修正 class_name 中不符合 CLIP 友好规则的词，自动修复或警告。"""
         for item in data.get("classes", []):
-            original_name = item.get("class_name", "")
+            if not item or not isinstance(item, dict):
+                continue
+            original_name = item.get("class_name", "") or ""
             warnings: list[str] = []
 
             # 规则1：包含中文/拼音

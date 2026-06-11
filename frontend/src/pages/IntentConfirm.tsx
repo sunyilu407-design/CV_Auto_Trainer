@@ -6,7 +6,7 @@ import { buildDetectionClass } from '../utils/detectionPrompts'
 import NegotiationChat from '../components/NegotiationChat'
 import ConfigPreview from '../components/ConfigPreview'
 import ConfirmPanel from '../components/ConfirmPanel'
-import { negotiateApi } from '../api/backend'
+import { negotiateApi, algorithmApi } from '../api/backend'
 import { useSettingsStore } from '../store/settingsStore'
 
 function detectScenarioLabel(userDescription: string): string {
@@ -81,6 +81,39 @@ function extractObjects(userDescription: string, visualObjects: string[]): strin
 // 新版: 对话式需求确认（多智能体架构）
 // ===========================================================================
 
+// 传统模式确认：从 IntentConfirmLegacy 抽出，确认后生成算法方案并跳 algorithm_plan
+async function handleLegacyConfirm(params: {
+  taskId: string
+  vlmResult: { classes: VLMClass[] } | null
+  userDescription: string
+  deviceProfileId: string
+  setAlgorithmPlan: (plan: any) => void
+  setStage: (stage: 'upload' | 'intent_confirm' | 'algorithm_plan' | any) => void
+}) {
+  const { taskId, vlmResult, userDescription, deviceProfileId, setAlgorithmPlan, setStage } = params
+  // 使用当前 store 中的 classes 列表构建 classes 数据
+  const classes = (vlmResult?.classes ?? []).map((c) => ({
+    class_name: c.class_name,
+    prompt: c.prompt,
+    negative_prompt: c.negative_prompt,
+    color_hint: c.color_hint,
+    display_name_zh: c.display_name_zh,
+    display_prompt_zh: c.display_prompt_zh,
+    display_negative_prompt_zh: c.display_negative_prompt_zh,
+    display_color_hint_zh: c.display_color_hint_zh,
+  }))
+  const plan = await algorithmApi.generatePlan({
+    task_id: taskId,
+    user_description: userDescription,
+    vlm_result: classes.length > 0 ? { classes } : null,
+    gpu_type: deviceProfileId,
+    use_vlm_planner: true,
+    algorithm_hints: null,
+  })
+  setAlgorithmPlan(plan)
+  setStage('algorithm_plan')
+}
+
 export default function IntentConfirm() {
   const {
     taskId,
@@ -89,8 +122,10 @@ export default function IntentConfirm() {
     setNegotiationMessages,
     setNegotiatedConfig,
     setNegotiationConverged,
+    setNegotiationInitialized,
     userDescription,
     vlmResult,
+    setAlgorithmPlan,
   } = useTaskStore()
   const { settings } = useSettingsStore()
 
@@ -121,6 +156,8 @@ export default function IntentConfirm() {
             setNegotiatedConfig(data.current_config as any)
           }
           setNegotiationConverged(data.confirmed)
+          // 标记已初始化，避免切换模式后重复发送 __INIT__
+          setNegotiationInitialized(true)
         }
       })
       .catch(() => {})
@@ -885,7 +922,14 @@ function IntentConfirmLegacy({ onSwitchToChat }: { onSwitchToChat?: () => void }
       <div className="flex gap-3" style={{ alignItems: 'center' }}>
         <button
           className="btn btn-primary"
-          onClick={() => setStage('algorithm_plan')}
+          onClick={() => handleLegacyConfirm({
+            taskId: taskId ?? '',
+            vlmResult,
+            userDescription,
+            deviceProfileId,
+            setAlgorithmPlan,
+            setStage,
+          })}
           disabled={blockNext}
           style={{
             padding: '10px 24px',

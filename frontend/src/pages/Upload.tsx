@@ -262,6 +262,8 @@ export default function Upload() {
       }))
 
       if (result.status === 'success') {
+        // 保存 VLM 结果到后端数据库，供后续协商流程使用
+        await vlmApi.updateResult(currentTaskId, classes)
         setVLMResult({
           classes,
           raw_vlm_response: rawResponse,
@@ -684,6 +686,30 @@ export default function Upload() {
                 </>
               )}
             </button>
+            {loading && (
+              <div style={{
+                marginTop: 10,
+                padding: '8px 14px',
+                background: 'rgba(10,114,239,0.04)',
+                border: '1px solid rgba(10,114,239,0.15)',
+                borderRadius: 6,
+                fontSize: 12,
+                color: 'var(--gray-600)',
+                textAlign: 'center',
+                lineHeight: 1.5,
+              }}>
+                <span style={{ fontWeight: 600, color: 'var(--develop-blue)' }}>视觉大模型解析中</span>
+                {sampleImages.length > 0 && (
+                  <> · 正在分析 {sampleImages.length} 张样板图</>
+                )}
+                {sampleImageBoxes.reduce((acc, item) => acc + item.boxes.length, 0) > 0 && (
+                  <> · 已标注 {sampleImageBoxes.reduce((acc, item) => acc + item.boxes.length, 0)} 个示例框</>
+                )}
+                <div style={{ marginTop: 4, color: 'var(--gray-400)', fontSize: 11 }}>
+                  解析时间取决于图片数量和网络状况，请稍候...
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Hint */}

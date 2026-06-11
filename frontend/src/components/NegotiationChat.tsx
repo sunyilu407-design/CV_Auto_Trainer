@@ -163,16 +163,24 @@ export default function NegotiationChat({ suppressInit: _suppressInit = false }:
   const {
     taskId,
     conversationId,
+    negotiationMessages,
     negotiationConverged,
+    negotiationInitialized,
     setConversationId,
     setNegotiatedConfig,
     setNegotiationConverged,
+    setNegotiationInitialized,
     resetNegotiation,
   } = useTaskStore()
 
   const [streams, setStreams] = useState<StreamBubble[]>([]) // 当前流式气泡列表
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [generatingProgress, setGeneratingProgress] = useState<{ step: number; message: string } | null>(null)
+  const [isGeneratingConfig, setIsGeneratingConfig] = useState(false)
+  // True when the SSE connection is established but no text chunk has arrived yet.
+  // Gives immediate "connecting..." feedback even before the first byte arrives.
+  const [isConnecting, setIsConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -188,6 +196,26 @@ export default function NegotiationChat({ suppressInit: _suppressInit = false }:
   useEffect(() => {
     if (!isLoading) inputRef.current?.focus()
   }, [isLoading])
+
+  // 把 store 中恢复的历史消息同步到本地 streams
+  // 只在 streams 为空且有历史消息时同步一次，避免重复
+  const hydratedRef = useRef(false)
+  useEffect(() => {
+    if (hydratedRef.current || streams.length > 0) return
+    if (!negotiationMessages || negotiationMessages.length === 0) return
+    hydratedRef.current = true
+    const restored: StreamBubble[] = negotiationMessages.map((m, i) => ({
+      id: `restored-${i}-${m.timestamp ?? Date.now()}`,
+      content: m.content,
+      isUser: m.role === 'user',
+      timestamp: m.timestamp ?? Date.now(),
+      isStreaming: false,
+      configUpdated: m.metadata?.config_updated ?? false,
+      converged: m.metadata?.converged ?? false,
+    }))
+    setStreams(restored)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [negotiationMessages])
 
   const handleStreamStart = useCallback((text: string, isUser: boolean) => {
     const id = `stream-${Date.now()}-${streamIdRef.current++}`
@@ -235,12 +263,31 @@ export default function NegotiationChat({ suppressInit: _suppressInit = false }:
     abortRef.current?.()
     setError(null)
     setIsLoading(true)
+    setIsConnecting(true)
 
-    // Add user message bubble immediately
-    handleStreamStart(message, true)
+    // Add user message to streams immediately (if not initial)
+    if (!isInitial && message) {
+      const userBubbleId = `user-${Date.now()}-${streamIdRef.current++}`
+      setStreams(prev => [...prev, {
+        id: userBubbleId,
+        content: message,
+        isUser: true,
+        timestamp: Date.now(),
+        isStreaming: false,
+      }])
+    }
 
     // Add empty AI bubble immediately (before any chunk arrives)
     const aiBubbleId = startAIStream()
+
+    let firstChunkHandled = false
+    const handleChunk = (chunk: string) => {
+      if (!firstChunkHandled) {
+        firstChunkHandled = true
+        setIsConnecting(false)
+      }
+      appendToStream(aiBubbleId, chunk)
+    }
 
     const cleanup = negotiateApi.streamChat({
       task_id: taskId,
@@ -248,10 +295,10 @@ export default function NegotiationChat({ suppressInit: _suppressInit = false }:
       conversation_id: conversationId,
       include_initial: isInitial || streams.length === 0,
     }, {
-      onChunk: (chunk) => {
-        appendToStream(aiBubbleId, chunk)
-      },
+      onStatus: () => setIsConnecting(false),
+      onChunk: handleChunk,
       onDone: (data) => {
+        setIsConnecting(false)
         // Update conversation ID
         if (data.conversation_id && data.conversation_id !== conversationId) {
           setConversationId(data.conversation_id)
@@ -268,7 +315,14 @@ export default function NegotiationChat({ suppressInit: _suppressInit = false }:
         abortRef.current = null
       },
       onError: (err) => {
-        setError(err.message || '对话请求失败，请重试')
+        setIsConnecting(false)
+        // 详细错误日志，便于调试
+        console.error('[NegotiationChat] SSE error:', err)
+        // 用户友好的错误消息
+        const friendlyMessage = err.message?.includes('StopIteration')
+          ? '对话处理出现技术问题，请重试'
+          : err.message || '对话请求失败，请稍后重试'
+        setError(friendlyMessage)
         finishStream(aiBubbleId)
         setIsLoading(false)
         abortRef.current = null
@@ -277,6 +331,23 @@ export default function NegotiationChat({ suppressInit: _suppressInit = false }:
 
     abortRef.current = cleanup
   }, [taskId, conversationId, streams.length, handleStreamStart, startAIStream, appendToStream, finishStream, setConversationId, setNegotiatedConfig, setNegotiationConverged])
+
+  // 自动初始化对话：当没有消息且未初始化时，自动发送 __INIT__ 信号
+  // 使用 store 中的 negotiationInitialized 标志，避免组件重新挂载后重复初始化
+  // 如果已经有对话消息（从后端恢复），也不需要再初始化
+  useEffect(() => {
+    // 等待 hydrating 完成：有 taskId，没有 suppressInit，
+    // 没有 suppressInit，没有对话消息，且尚未初始化
+    if (_suppressInit || !taskId || negotiationInitialized || negotiationMessages.length > 0) {
+      return
+    }
+    // 延迟一点确保组件完全挂载
+    const timer = setTimeout(() => {
+      setNegotiationInitialized(true)
+      startStream('', true)  // isInitial = true → message = '__INIT__'
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [taskId, _suppressInit, negotiationInitialized, negotiationMessages.length, startStream, setNegotiationInitialized])
 
   async function handleSend(message?: string, isInitial = false) {
     const text = message ?? input.trim()
@@ -347,7 +418,22 @@ export default function NegotiationChat({ suppressInit: _suppressInit = false }:
         </div>
         <span>需求确认助手</span>
 
-        {isLoading && (
+        {isConnecting && (
+          <div style={{
+            marginLeft: 8, display: 'flex', alignItems: 'center', gap: 4,
+            fontSize: 11, color: '#9333ea', fontWeight: 500,
+          }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: '#9333ea',
+              animation: 'pulse 1s ease-in-out infinite',
+              display: 'inline-block',
+            }} />
+            <span>连接中...</span>
+          </div>
+        )}
+
+        {isLoading && !isConnecting && (
           <div style={{
             marginLeft: 8, display: 'flex', alignItems: 'center', gap: 4,
             fontSize: 11, color: '#0a72ef', fontWeight: 500,
@@ -488,61 +574,128 @@ export default function NegotiationChat({ suppressInit: _suppressInit = false }:
           padding: '12px 16px',
           borderTop: '1px solid var(--gray-100)',
           display: 'flex',
+          flexDirection: 'column',
           gap: 8,
-          alignItems: 'flex-end',
         }}
       >
-        <textarea
-          ref={inputRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="描述您的需求，或回复 AI 的问题…"
-          disabled={isLoading}
-          rows={1}
-          style={{
-            flex: 1,
-            resize: 'none',
-            border: '1px solid var(--gray-200)',
-            borderRadius: 8,
+        {/* Skip to confirm button */}
+        {!negotiationConverged && streams.length > 1 && !isLoading && !isGeneratingConfig && (
+          <button
+            onClick={async () => {
+              if (!taskId || !conversationId) return
+              setIsGeneratingConfig(true)
+              setGeneratingProgress({ step: 0, message: '正在准备生成配置...' })
+
+              // 立即解锁确认按钮
+              setNegotiationConverged(true)
+
+              // 后台调用 LLM 生成配置
+              negotiateApi.generateConfig(
+                { task_id: taskId, conversation_id: conversationId },
+                {
+                  onProgress: (data) => {
+                    setGeneratingProgress(data)
+                  },
+                  onDone: (data) => {
+                    setIsGeneratingConfig(false)
+                    setGeneratingProgress(null)
+                    if (data.updated_config) {
+                      setNegotiatedConfig(data.updated_config)
+                    }
+                  },
+                  onError: (err) => {
+                    setIsGeneratingConfig(false)
+                    setGeneratingProgress(null)
+                    console.error('Generate config error:', err)
+                  },
+                }
+              )
+            }}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 6,
+              border: '1px solid var(--gray-200)',
+              background: '#fff',
+              color: 'var(--gray-600)',
+              fontSize: 12,
+              cursor: 'pointer',
+              width: 'fit-content',
+            }}
+            title="跳过追问，直接生成配置"
+          >
+            跳过追问，直接生成配置
+          </button>
+        )}
+
+        {/* LLM 生成进度 */}
+        {isGeneratingConfig && generatingProgress && (
+          <div style={{
             padding: '8px 12px',
-            fontSize: 13,
-            lineHeight: '1.4',
-            outline: 'none',
-            minHeight: 36,
-            maxHeight: 100,
-            overflow: 'auto',
-            transition: 'border-color 0.15s',
-          }}
-          onFocus={(e) => (e.target.style.borderColor = '#0a72ef')}
-          onBlur={(e) => (e.target.style.borderColor = 'var(--gray-200)')}
-        />
-        <button
-          onClick={() => handleSend()}
-          disabled={isLoading || !input.trim()}
-          style={{
-            padding: '8px 16px',
+            background: 'rgba(10, 114, 239, 0.08)',
             borderRadius: 8,
-            border: 'none',
-            background: isLoading || !input.trim() ? 'var(--gray-200)' : '#0a72ef',
-            color: isLoading || !input.trim() ? 'var(--gray-400)' : '#fff',
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: isLoading || !input.trim() ? 'not-allowed' : 'pointer',
-            whiteSpace: 'nowrap',
-            transition: 'background 0.15s',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          {isLoading ? (
-            <>
+            fontSize: 12,
+            color: '#0a72ef',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span className="mini-spinner" />
-              生成中
-            </>
-          ) : '发送'}
-        </button>
+              <span>{generatingProgress.message}</span>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="描述您的需求，或回复 AI 的问题…"
+            disabled={isLoading}
+            rows={1}
+            style={{
+              flex: 1,
+              resize: 'none',
+              border: '1px solid var(--gray-200)',
+              borderRadius: 8,
+              padding: '8px 12px',
+              fontSize: 13,
+              lineHeight: '1.4',
+              outline: 'none',
+              minHeight: 36,
+              maxHeight: 100,
+              overflow: 'auto',
+              transition: 'border-color 0.15s',
+            }}
+            onFocus={(e) => (e.target.style.borderColor = '#0a72ef')}
+            onBlur={(e) => (e.target.style.borderColor = 'var(--gray-200)')}
+          />
+          <button
+            onClick={() => handleSend()}
+            disabled={isLoading || !input.trim()}
+            style={{
+              padding: '8px 16px',
+              borderRadius: 8,
+              border: 'none',
+              background: isLoading || !input.trim() ? 'var(--gray-200)' : '#0a72ef',
+              color: isLoading || !input.trim() ? 'var(--gray-400)' : '#fff',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: isLoading || !input.trim() ? 'not-allowed' : 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'background 0.15s',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            {isLoading ? (
+              <>
+                <span className="mini-spinner" />
+                生成中
+              </>
+            ) : '发送'}
+          </button>
+        </div>
       </div>
     </div>
   )

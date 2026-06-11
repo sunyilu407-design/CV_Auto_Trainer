@@ -17,6 +17,8 @@ from services.dataset_packer import prepare_full_dataset, compute_quality_report
 from services.video_inference import annotate_video_frames
 import threading
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/training", tags=["training"])
 
 # 相对路径基准：项目根目录（backend/ 的上一级）

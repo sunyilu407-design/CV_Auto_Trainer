@@ -72,6 +72,11 @@ class TrainDispatcher:
         if task.training_state == "error":
             raise RuntimeError(f"本地训练失败: {task.error_message}")
 
+        # 超时：强制写入终止状态，避免任务永久卡在 training_local
+        task.status = "error"
+        task.training_state = "timeout"
+        task.error_message = "本地训练超时（30 分钟内未收到完成通知）"
+        self.db.commit()
         raise RuntimeError("本地训练超时（30 分钟内未收到完成通知）")
 
     def _run_cloud(self, task: Task, train_config: dict, progress_callback: Optional[Callable]):

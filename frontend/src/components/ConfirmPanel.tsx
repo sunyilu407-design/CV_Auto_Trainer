@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTaskStore } from '../store/taskStore'
-import { negotiateApi } from '../api/backend'
+import { negotiateApi, algorithmApi } from '../api/backend'
 
 export default function ConfirmPanel() {
   const {
@@ -10,6 +10,10 @@ export default function ConfirmPanel() {
     negotiationConverged,
     setStage,
     setVLMResult,
+    setAlgorithmPlan,
+    userDescription,
+    vlmResult,
+    deviceProfileId,
   } = useTaskStore()
 
   const [confirming, setConfirming] = useState(false)
@@ -34,6 +38,27 @@ export default function ConfirmPanel() {
           confidence: null,
         })
       }
+
+      // 生成算法方案（复用 IntentConfirm 的逻辑）
+      const vlmClasses = (classes ?? []).map((c: any) => ({
+        class_name: c.class_name,
+        prompt: c.prompt,
+        negative_prompt: c.negative_prompt,
+        color_hint: c.color_hint,
+        display_name_zh: c.display_name_zh,
+        display_prompt_zh: c.display_prompt_zh,
+        display_negative_prompt_zh: c.display_negative_prompt_zh,
+        display_color_hint_zh: c.display_color_hint_zh,
+      }))
+      const plan = await algorithmApi.generatePlan({
+        task_id: taskId,
+        user_description: userDescription ?? '',
+        vlm_result: vlmClasses.length > 0 ? { classes: vlmClasses } : null,
+        gpu_type: deviceProfileId,
+        use_vlm_planner: true,
+        algorithm_hints: negotiatedConfig?.algorithm_hints as any ?? null,
+      })
+      setAlgorithmPlan(plan)
 
       // 跳转到下一阶段
       setStage('algorithm_plan')

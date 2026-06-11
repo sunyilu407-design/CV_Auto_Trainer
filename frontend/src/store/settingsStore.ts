@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import { useAuthStore } from './authStore'
 
 export type CloudProvider = 'generic' | 'autodl'
@@ -131,66 +132,74 @@ async function parseJsonSafe(res: Response): Promise<Record<string, unknown> | n
   }
 }
 
-export const useSettingsStore = create<SettingsState>((set, get) => ({
-  settings: defaultSettings,
-  loading: false,
+export const useSettingsStore = create<SettingsState>()(
+  persist(
+    (set, get) => ({
+      settings: defaultSettings,
+      loading: false,
 
-  setSettings: (updates) =>
-    set((state) => ({ settings: { ...state.settings, ...updates } })),
+      setSettings: (updates) =>
+        set((state) => ({ settings: { ...state.settings, ...updates } })),
 
-  loadSettings: async () => {
-    set({ loading: true })
-    try {
-      const res = await fetch('/api/settings', {
-        headers: authHeaders(),
-      })
-      const json = await parseJsonSafe(res)
+      loadSettings: async () => {
+        set({ loading: true })
+        try {
+          const res = await fetch('/api/settings', {
+            headers: authHeaders(),
+          })
+          const json = await parseJsonSafe(res)
 
-      if (res.status === 401 || json?.code === 401 || json?.detail === '未登录') {
-        useAuthStore.getState().logout()
-        return
-      }
+          if (res.status === 401 || json?.code === 401 || json?.detail === '未登录') {
+            useAuthStore.getState().logout()
+            return
+          }
 
-      if (json?.code === 0 && json.data) {
-        const mapped = mapKeys(json.data as Record<string, unknown>, snakeToCamel)
-        set({ settings: { ...defaultSettings, ...mapped } as UserSettings })
-      }
-    } catch {
-      // use defaults
-    } finally {
-      set({ loading: false })
+          if (json?.code === 0 && json.data) {
+            const mapped = mapKeys(json.data as Record<string, unknown>, snakeToCamel)
+            set({ settings: { ...defaultSettings, ...mapped } as UserSettings })
+          }
+        } catch {
+          // use defaults
+        } finally {
+          set({ loading: false })
+        }
+      },
+
+      saveSettings: async (updates) => {
+        const current = get().settings
+        const merged = { ...current, ...updates }
+        const toSave = mapKeys(merged as unknown as Record<string, unknown>, camelToSnake)
+
+        try {
+          const res = await fetch('/api/settings', {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              ...authHeaders(),
+            },
+            body: JSON.stringify(toSave),
+          })
+          const json = await parseJsonSafe(res)
+
+          if (res.status === 401 || json?.code === 401 || json?.detail === '未登录') {
+            useAuthStore.getState().logout()
+            return { success: false, message: '登录状态已失效，请重新登录后再保存' }
+          }
+
+          if (json?.code === 0) {
+            set({ settings: merged })
+            return { success: true, message: '设置已保存' }
+          } else {
+            return { success: false, message: String(json?.msg || '保存失败') }
+          }
+        } catch {
+          return { success: false, message: '网络错误，请稍后重试' }
+        }
+      },
+    }),
+    {
+      name: 'cv-settings-storage', // localStorage key
+      partialize: (state) => ({ settings: state.settings }),
     }
-  },
-
-  saveSettings: async (updates) => {
-    const current = get().settings
-    const merged = { ...current, ...updates }
-    const toSave = mapKeys(merged as unknown as Record<string, unknown>, camelToSnake)
-
-    try {
-      const res = await fetch('/api/settings', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          ...authHeaders(),
-        },
-        body: JSON.stringify(toSave),
-      })
-      const json = await parseJsonSafe(res)
-
-      if (res.status === 401 || json?.code === 401 || json?.detail === '未登录') {
-        useAuthStore.getState().logout()
-        return { success: false, message: '登录状态已失效，请重新登录后再保存' }
-      }
-
-      if (json?.code === 0) {
-        set({ settings: merged })
-        return { success: true, message: '设置已保存' }
-      } else {
-        return { success: false, message: String(json?.msg || '保存失败') }
-      }
-    } catch {
-      return { success: false, message: '网络错误，请稍后重试' }
-    }
-  },
-}))
+  )
+)

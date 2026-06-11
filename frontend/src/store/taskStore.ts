@@ -322,6 +322,7 @@ export interface TaskState {
   negotiationMessages: NegotiationMessage[]
   negotiatedConfig: NegotiatedConfig | null
   negotiationConverged: boolean
+  negotiationInitialized: boolean  // 标记初始 __INIT__ 是否已发送
 
   // 增量打标 (snowball)
   snowballMode: boolean
@@ -409,6 +410,7 @@ export interface TaskState {
   setNegotiationMessages: (msgs: NegotiationMessage[]) => void
   setNegotiatedConfig: (config: NegotiatedConfig | null) => void
   setNegotiationConverged: (v: boolean) => void
+  setNegotiationInitialized: (v: boolean) => void
   resetNegotiation: () => void
   reset: () => void
 }
@@ -483,6 +485,7 @@ export const useTaskStore = create<TaskState>()(
   negotiationMessages: [],
   negotiatedConfig: null,
   negotiationConverged: false,
+  negotiationInitialized: false,
 
   snowballMode: false,
   snowballRound: 0,
@@ -659,12 +662,14 @@ export const useTaskStore = create<TaskState>()(
   setNegotiationMessages: (msgs) => set({ negotiationMessages: msgs }),
   setNegotiatedConfig: (config) => set({ negotiatedConfig: config }),
   setNegotiationConverged: (v) => set({ negotiationConverged: v }),
+  setNegotiationInitialized: (v) => set({ negotiationInitialized: v }),
   resetNegotiation: () =>
     set({
       conversationId: null,
       negotiationMessages: [],
       negotiatedConfig: null,
       negotiationConverged: false,
+      negotiationInitialized: false,
     }),
 
   reset: () =>
@@ -686,6 +691,7 @@ export const useTaskStore = create<TaskState>()(
       negotiationMessages: [],
       negotiatedConfig: null,
       negotiationConverged: false,
+      negotiationInitialized: false,
       snowballMode: false,
       snowballRound: 0,
       seedAnnotatedCount: 0,

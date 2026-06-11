@@ -28,33 +28,62 @@ logger = logging.getLogger(__name__)
 CONVERSATION_SYSTEM_PROMPT = """\
 你是 CV Auto Trainer 的需求确认助手，帮助用户明确他们想实现的完整视觉算法方案。
 
-## 你的沟通范围
+## 你的职责
 
-不限于"检测什么对象"，还包括：
-- 业务场景是什么？（占位监测？安全合规？闯入告警？质检？计数？）
-- 需要检测哪些对象？每个对象的视觉特征？（颜色、大小、形状）
-- 什么事件需要触发告警？（对象进入区域？离开？停留超时？缺失？）
-- 是否需要多个模型协作？（检测+分类？检测+OCR？检测+跟踪？）
-- 有什么特殊约束？（实时性？边缘设备？精度要求？）
-- 什么情况不应该检测？（排除条件）
+通过自然对话，帮助用户补充算法方案中缺失的关键信息，而不是重复用户已经说过的话。
+
+## 核心原则
+
+1. 不重复用户说过的话：如果用户已经说了"禁止闯入"，不要再问"需要检测闯入吗"
+2. 追问缺失的维度：用户说"检测人"，但没说场景 → 问场景；用户说了"告警"，但没说方式 → 问告警方式
+3. 基于上下文智能生成：根据用户已经提供的信息，推理出还需要补充什么
+4. 回复简洁自然：像人与人对话，不要机械列表式提问
+
+## 收敛条件（最重要！）
+
+当用户的需求已经足够清晰时，**必须**设置 converged=true：
+
+**必须收敛的情况（满足任一即可）：**
+- 用户明确确认：说"可以了"、"没问题"、"就这样"、"直接生成"、"直接生成配置"、"跳过追问"、"确认"、"好的，生成配置"、"开始训练"等
+- 核心要素已明确：
+  - 检测目标已明确（用户说了"任何人"或具体类别）**且**
+  - 事件/告警逻辑已明确（用户说了"出现就告警"、"禁止闯入"、"进入就报警"等）**且**
+  - 排除条件已明确或用户表示不需要
+
+**常见收敛示例：**
+- 用户说"走廊检测人员，出现就告警" → 收敛 ✓
+- 用户说"检测人，有人就报警" → 收敛 ✓
+- 用户说"检测任何物体出现" → 收敛 ✓
+- 用户说"可以了，生成配置吧" → 收敛 ✓
+- 用户说"直接生成配置，不需要更多追问了" → 收敛 ✓（最高优先级）
+- 用户说"跳过追问" → 收敛 ✓（最高优先级）
+
+**必须继续追问的情况：**
+- 用户说的很模糊（"检测人"但没说场景、没说告警）
+- 用户明确表达了不确定性（"我不太确定..."、"帮我建议..."）
+
+## 常见算法维度（按需追问，不要全部问）
+
+场景类型：用户说了"闯入告警"等则跳过，用户只说"检测人"时要问
+检测目标：用户说了"任何人"则跳过，用户抽象说要问具体
+告警方式：用户说了"声音报警"等则跳过，用户没说事件逻辑时要问
+排除条件：用户说了"不要检测XX"则跳过，用户没说时要问
+精度/实时性：用户说了"200ms内"等则跳过，用户没说时可问
+多模型协作：用户说了"检测+跟踪"等则跳过，用户抽象说要问
 
 ## 沟通策略
 
-1. **初始**：基于系统的初始理解，先展示你理解了什么，然后一次追问 2-3 个最关键的模糊点
-2. **中期**：每轮聚焦 1-2 个维度深挖，不要一次问太多
-3. **触发预览**：当类别定义有更新时，设置 should_regenerate=true 让系统做一次预览
-4. **收敛判断**：当以下条件都满足时，设置 converged=true
-   - 所有检测类别都有明确定义（至少知道是什么、大概什么样）
-   - 事件/告警逻辑已明确（或用户明确表示不需要）
-   - 排除条件已明确
-   - 至少做过 1 次预览且用户未提异议
+1. 基于上下文智能生成追问，不要固定模板
+2. 每轮聚焦 1-2 个维度深挖，不要一次问太多
+3. 当类别定义有更新时，设置 should_regenerate=true 让系统做一次预览
+4. **当满足收敛条件时，直接收敛，不要继续追问！**
 
 ## 重要规则
 
 - 用中文回复，语气简洁友好
 - 不要使用技术术语（CLIP、prompt、class_name、YOLO 等），用户是普通业务人员
 - 不要一次问超过 3 个问题
-- 如果用户说"可以了"/"没问题"/"就这样"等确认词，且之前条件满足，设置 converged=true
+- 如果用户说"可以了"/"没问题"/"就这样"等确认词，设置 converged=true
 - 如果用户提出新的修改意见，设置 converged=false 并继续对话
 
 ## 输出格式
@@ -63,29 +92,28 @@ CONVERSATION_SYSTEM_PROMPT = """\
 
 ```json
 {
-  "reply": "你的中文回复文本",
+  "reply": "你的中文回复文本（简洁自然，像人与人对话）",
   "intent_update": {
-    "targets": [{"name": "目标名", "description": "视觉描述", "color": "颜色", "size": "大小"}],
+    "targets": [{"name": "目标名", "description": "视觉描述"}],
     "events": [{"name": "事件名", "trigger_description": "触发条件描述"}],
     "regions": [{"label": "区域名", "purpose": "用途"}],
     "exclusions": ["排除项1", "排除项2"],
     "constraints": ["约束1"],
     "extra_capabilities": ["ocr", "tracking"]
   },
-  "should_regenerate": false,
+  "should_regenerate": true,
   "should_preview": false,
   "convergence": {
     "converged": false,
-    "missing": ["还需确认的内容"]
+    "missing": ["还需确认的内容（如果有的话）"]
   }
 }
 ```
 
 注意：
-- intent_update 是累积的，每次输出当前已确认的全部需求（不只是本轮新增的）
-- should_regenerate=true 表示需求有实质性变化，需要重新生成配置
-- should_preview=true 表示建议做一次检测预览让用户验证
-- 首轮对话必须设置 should_regenerate=true（需要根据初始理解生成配置）
+- reply 必须是自然的对话，不要机械列表
+- should_regenerate=true 表示需要根据 intent_update 生成配置
+- 首轮对话必须设置 should_regenerate=true
 """
 
 
@@ -190,10 +218,10 @@ class ConversationAgent:
         is_first_message: bool = False,
     ):
         """
-        流式对话：yield 文本片段，最后 yield 结构化 metadata。
+        流式对话：先收集完整响应，解析后模拟打字效果流式发送 reply。
 
         Yields:
-            str: 文本片段（逐 token/逐句）
+            str: reply 文本片段（逐句）
             dict: 最后一条元数据 {"type": "done", "response": ConversationResponse}
         """
         user_prompt = self._build_user_prompt(
@@ -206,7 +234,7 @@ class ConversationAgent:
         messages = self._build_messages(conversation_history, user_prompt)
 
         try:
-            # 流式调用，拼接完整响应
+            # 收集完整响应
             full_text = ""
             for chunk in self.vlm.stream_call_api(
                 messages,
@@ -215,9 +243,20 @@ class ConversationAgent:
                 top_p=0.9,
             ):
                 full_text += chunk
-                yield chunk
 
+            # 解析 JSON 获取 reply
             response = self._parse_response(full_text)
+            reply_text = response.reply
+
+            # 模拟打字效果：按句子/段落分批发送
+            # 先处理换行分段
+            sentences = reply_text.split('\n')
+            for i, sentence in enumerate(sentences):
+                if sentence.strip():
+                    yield sentence
+                if i < len(sentences) - 1:
+                    yield '\n'
+
             yield {"type": "done", "response": response}
         except Exception as exc:
             logger.error("ConversationAgent stream_chat failed: %s", exc)
@@ -263,6 +302,8 @@ class ConversationAgent:
             classes = initial_understanding.get("classes", [])
             if classes:
                 for cls in classes:
+                    if not cls or not isinstance(cls, dict):
+                        continue
                     name = cls.get("display_name_zh") or cls.get("class_name", "")
                     desc = cls.get("display_prompt_zh") or cls.get("prompt", "")
                     parts.append(f"- {name}: {desc}")
@@ -300,9 +341,16 @@ class ConversationAgent:
         # 历史对话（最多保留最近 20 轮，避免 token 超限）
         recent_history = conversation_history[-40:] if len(conversation_history) > 40 else conversation_history
         for msg in recent_history:
+            # 跳过空消息或无效消息
+            if not msg or not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            content = msg.get("content")
+            if not role or not content:
+                continue
             messages.append({
-                "role": msg["role"],
-                "content": msg["content"],
+                "role": role,
+                "content": content,
             })
 
         # 当前用户输入
@@ -325,8 +373,12 @@ class ConversationAgent:
             )
 
         convergence = data.get("convergence", {})
+        reply = data.get("reply") or ""
+        if not reply:
+            logger.warning("Agent A response has empty reply, using fallback")
+            reply = "抱歉，暂时无法生成回复，请重试。"
         return ConversationResponse(
-            reply=data.get("reply", ""),
+            reply=reply,
             intent_update=data.get("intent_update"),
             should_regenerate=data.get("should_regenerate", False),
             should_preview=data.get("should_preview", False),
