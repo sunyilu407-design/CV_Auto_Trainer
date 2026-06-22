@@ -14,7 +14,7 @@ if (-not $env:CV_AUTO_TRAINER_SECRET_KEY) { $env:CV_AUTO_TRAINER_SECRET_KEY = "c
 if (-not $env:CV_AUTO_TRAINER_ADMIN_USERNAME) { $env:CV_AUTO_TRAINER_ADMIN_USERNAME = "admin" }
 if (-not $env:CV_AUTO_TRAINER_ADMIN_PASSWORD) { $env:CV_AUTO_TRAINER_ADMIN_PASSWORD = "change-me" }
 if (-not $env:CV_AUTO_TRAINER_FRONTEND_DIST) { $env:CV_AUTO_TRAINER_FRONTEND_DIST = $FrontendDistDefault }
-if (-not $env:CV_AUTO_TRAINER_CORS_ORIGINS) { $env:CV_AUTO_TRAINER_CORS_ORIGINS = "http://127.0.0.1:8000,http://localhost:8000" }
+if (-not $env:CV_AUTO_TRAINER_CORS_ORIGINS) { $env:CV_AUTO_TRAINER_CORS_ORIGINS = "http://127.0.0.1:5173,http://localhost:5173" }
 
 Set-Location $BackendDir
 python -X utf8 -m uvicorn main:app --host 127.0.0.1 --port 8000

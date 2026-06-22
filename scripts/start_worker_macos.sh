@@ -16,5 +16,11 @@ else
   exit 1
 fi
 
+# Worker 启动时自动预装模型（YOLO-World + CLIP），已安装则跳过
+# 设为 "off" 可禁用，改用手动 POST /prepare-models
+export CV_AUTO_TRAINER_WORKER_AUTO_PREPARE="${CV_AUTO_TRAINER_WORKER_AUTO_PREPARE:-on}"
+# 是否在启动时同时预装 Moondream2 VQA 模型（会增加下载时间和显存占用）
+export CV_AUTO_TRAINER_WORKER_PREPARE_MOONDREAM="${CV_AUTO_TRAINER_WORKER_PREPARE_MOONDREAM:-off}"
+
 cd "$WORKER_DIR"
 exec "$PYTHON_BIN" main.py
