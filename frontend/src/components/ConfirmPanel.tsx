@@ -12,7 +12,6 @@ export default function ConfirmPanel() {
     setVLMResult,
     setAlgorithmPlan,
     userDescription,
-    vlmResult,
     deviceProfileId,
   } = useTaskStore()
 

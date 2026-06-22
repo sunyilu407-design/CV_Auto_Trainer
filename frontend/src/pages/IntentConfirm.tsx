@@ -125,7 +125,6 @@ export default function IntentConfirm() {
     setNegotiationInitialized,
     userDescription,
     vlmResult,
-    setAlgorithmPlan,
   } = useTaskStore()
   const { settings } = useSettingsStore()
 
@@ -250,14 +249,17 @@ export default function IntentConfirm() {
 
 function IntentConfirmLegacy({ onSwitchToChat }: { onSwitchToChat?: () => void }) {
   const {
+    taskId,
     vlmResult,
     vlmStatus,
     vlmErrorMessage,
     userDescription,
+    deviceProfileId,
     updateVLMClass,
     removeVLMClass,
     addVLMClass,
     setStage,
+    setAlgorithmPlan,
   } = useTaskStore()
   const hasVisualCandidates = !!vlmResult && vlmStatus !== 'failed'
   const isExpandMode = hasVisualCandidates && !userDescription
