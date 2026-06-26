@@ -10,6 +10,14 @@ from pathlib import Path
 from threading import Lock
 from typing import Optional
 
+# 关闭 ultralytics 内部的 auto-install：
+# ultralytics 8.4+ 在 set_classes() 时如果检测到缺 clip 包，会自动 `uv pip install`，
+# 但该行为可能撞 Windows/macOS 写权限问题。我们的启动脚本已经主动 `pip install --user`
+# 预装好 clip 包；如果此处漏装，宁可 worker 报 ModuleNotFoundError 让用户明确感知，
+# 也不要让 ultralytics 静默修改用户系统。
+os.environ.setdefault("ULTRALYTICS_SKIP_REQUIREMENTS_CHECKS", "1")
+os.environ.setdefault("ULTRALYTICS_AUTOINSTALL", "0")
+
 # 相对路径基准：项目根目录
 _PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 

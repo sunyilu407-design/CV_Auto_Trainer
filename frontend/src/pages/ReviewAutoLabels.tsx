@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTaskStore } from '../store/taskStore'
+import { useAuthStore } from '../store/authStore'
 import { filesApi } from '../api/backend'
 import MultiClassAnnotationCanvas, {
   MCBox,
@@ -51,9 +52,12 @@ export default function ReviewAutoLabels() {
 
   const currentImage = images[currentIndex] || null
 
-  // Build image URL
+  // 用 hook 订阅 authStore，token 异步 hydrate 时 imageUrl 会重算
+  const authToken = useAuthStore((s) => s.token)
+  // Build image URL — <img> 加载无法附加 Authorization header，
+  // 所以把 token 拼到 query string，后端 serve_dataset_image 端点有 fallback 鉴权。
   const imageUrl = currentImage && taskId
-    ? `/api/files/${taskId}/image/${encodeURIComponent(currentImage.name)}`
+    ? `/api/files/${taskId}/image/${encodeURIComponent(currentImage.name)}${authToken ? `?token=${encodeURIComponent(authToken)}` : ''}`
     : ''
 
   // Load review boxes for current image
@@ -133,7 +137,7 @@ export default function ReviewAutoLabels() {
   if (loading) {
     return (
       <div style={{ padding: 40, textAlign: 'center', color: 'var(--gray-400)' }}>
-        Loading review images...
+        正在加载待审核图片...
       </div>
     )
   }
@@ -142,13 +146,13 @@ export default function ReviewAutoLabels() {
     return (
       <div style={{ padding: 40, textAlign: 'center' }}>
         <p style={{ fontSize: 14, color: 'var(--gray-500)', marginBottom: 16 }}>
-          No low-confidence predictions to review.
+          没有需要审核的低置信预测。
         </p>
         <button className="btn btn-primary" onClick={async () => {
           if (taskId) await filesApi.mergeLabelsAfterReview(taskId)
           setStage('augment')
         }}>
-          Continue to Augmentation
+          继续数据增强
         </button>
       </div>
     )
@@ -163,7 +167,7 @@ export default function ReviewAutoLabels() {
       {/* Header */}
       <div className="page-header" style={{ marginBottom: 24 }}>
         <div className="flex items-center gap-3 mb-2">
-          <div className="badge" style={{ background: '#f59e0b', color: '#fff', fontSize: 11, fontWeight: 600 }}>Review</div>
+          <div className="badge" style={{ background: '#f59e0b', color: '#fff', fontSize: 11, fontWeight: 600 }}>审核</div>
           <h1 className="page-title" style={{ marginBottom: 0 }}>低置信框审核</h1>
         </div>
         <p className="page-subtitle">
@@ -176,7 +180,7 @@ export default function ReviewAutoLabels() {
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--gray-500)', marginBottom: 4 }}>
           <span>{currentIndex + 1} / {images.length}</span>
           <span>
-            Reviewed: {reviewedCount} | Accepted: {acceptedCount} | Rejected: {rejectedCount}
+            已审核: {reviewedCount} | 已采纳: {acceptedCount} | 已拒绝: {rejectedCount}
           </span>
         </div>
         <div style={{ height: 4, background: 'var(--gray-100)', borderRadius: 2 }}>
@@ -229,7 +233,7 @@ export default function ReviewAutoLabels() {
                 color: decisions[currentImage.stem] === 'accept' ? '#166534' : '#991b1b',
               }}
             >
-              {decisions[currentImage.stem] === 'accept' ? 'ACCEPTED' : 'REJECTED'}
+              {decisions[currentImage.stem] === 'accept' ? '已采纳' : '已拒绝'}
             </div>
           )}
         </div>
@@ -238,7 +242,7 @@ export default function ReviewAutoLabels() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {/* Class selector */}
           <div style={{ background: '#fff', borderRadius: 8, border: '1px solid var(--gray-100)', padding: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray-500)', marginBottom: 8 }}>CLASS</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray-500)', marginBottom: 8 }}>类别</div>
             {classes.map((cls, idx) => (
               <button
                 key={idx}
@@ -270,14 +274,14 @@ export default function ReviewAutoLabels() {
             onClick={handleAccept}
             style={{ width: '100%', padding: '10px 16px', background: '#16a34a', borderColor: '#16a34a' }}
           >
-            ✓ Accept (A)
+            ✓ 采纳 (A)
           </button>
           <button
             className="btn btn-secondary"
             onClick={handleReject}
             style={{ width: '100%', padding: '10px 16px', color: '#dc2626', borderColor: '#dc2626' }}
           >
-            ✗ Reject (R)
+            ✗ 拒绝 (R)
           </button>
 
           {/* Navigation */}
@@ -288,7 +292,7 @@ export default function ReviewAutoLabels() {
               onClick={() => setCurrentIndex(currentIndex - 1)}
               style={{ flex: 1, padding: '8px 0' }}
             >
-              ← Prev
+              ← 上一张
             </button>
             <button
               className="btn btn-secondary"
@@ -296,8 +300,8 @@ export default function ReviewAutoLabels() {
               onClick={() => setCurrentIndex(currentIndex + 1)}
               style={{ flex: 1, padding: '8px 0' }}
             >
-              Next →
-            </button>
+            下一张 →
+          </button>
           </div>
 
           {/* Finish */}
@@ -307,10 +311,10 @@ export default function ReviewAutoLabels() {
             disabled={reviewedCount < images.length * 0.5}
             style={{ width: '100%', padding: '10px 16px', marginTop: 'auto' }}
           >
-            Complete Review ({reviewedCount}/{images.length})
+            完成审核 ({reviewedCount}/{images.length})
           </button>
           <p style={{ fontSize: 10, color: 'var(--gray-400)', textAlign: 'center', margin: 0 }}>
-            Review at least 50% to continue
+            需审核至少 50% 才能继续
           </p>
         </div>
       </div>

@@ -1,5 +1,8 @@
 torch>=2.0.0
 ultralytics>=8.3.0
+# ultralytics 8.4+ 在 set_classes() 时硬要求 import clip（OpenAI CLIP 实现）
+# 显式锁定 git 仓库依赖，避免运行时 auto-install 撞 Windows 权限
+clip @ git+https://github.com/ultralytics/CLIP.git
 transformers>=4.40.0
 huggingface_hub>=0.20.0
 albumentations>=1.4.0

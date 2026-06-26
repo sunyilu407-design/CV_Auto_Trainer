@@ -13,6 +13,7 @@ import httpx
 from types import SimpleNamespace as _SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
@@ -175,7 +176,6 @@ async def negotiate_chat_stream(
     import asyncio
     import json
     from datetime import datetime, timezone
-    from starlette.responses import StreamingResponse
 
     task = get_task_for_user(db, payload.task_id, current_user)
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Header
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Optional
 from models.database import get_db
-from routers.auth import require_auth
+from routers.auth import require_auth, get_current_user
 from services.task_access import get_task_for_user
 
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -277,14 +277,39 @@ def download_artifact(task_id: str, filename: str, current_user: dict = Depends(
     return FileResponse(path=file_path, filename=filename)
 
 
+def _auth_or_query_token(
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    与 require_auth 等价，但额外支持 ?token=xxx query 鉴权。
+
+    <img> 标签 / css background-image 等纯静态资源加载无法附加自定义 header，
+    所以允许把 token 拼到 URL query string 上。这是本地工具的妥协方案，
+    生产环境请改回 require_auth。
+    """
+    if authorization and authorization.startswith("Bearer "):
+        user = get_current_user(authorization[7:], db)
+        if user:
+            return user
+
+    if token:
+        user = get_current_user(token, db)
+        if user:
+            return user
+
+    raise HTTPException(status_code=401, detail="未登录")
+
+
 @router.get("/{task_id}/image/{image_name}")
 def serve_dataset_image(
     task_id: str,
     image_name: str,
-    token: Optional[str] = None,
-    current_user: dict = Depends(require_auth),
+    current_user: dict = Depends(_auth_or_query_token),
     db: Session = Depends(get_db),
 ):
+    """提供数据集图片给前端 <img> 标签加载，支持 Authorization header 或 ?token=xxx query 鉴权。"""
     task = get_task_for_user(db, task_id, current_user)
     safe_name = _safe_filename(image_name)
     for subdir_name in ["images", "video_frames"]:

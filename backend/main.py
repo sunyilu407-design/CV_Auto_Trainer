@@ -2,11 +2,12 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
+from starlette.websockets import WebSocket as WsClient
+import uvicorn, asyncio
 
 from routers import tasks, vlm, settings, training, files, auth, algorithm, models as models_router, reasoning, negotiate
 from models.database import SessionLocal
@@ -96,6 +97,65 @@ app.include_router(auth.router)
 app.include_router(models_router.router)
 app.include_router(reasoning.router)
 app.include_router(negotiate.router)
+
+# ── Worker WebSocket 中继 ──────────────────────────────────────────────────────
+# 前端连 ws://127.0.0.1:8000/ws，后端透明代理到 Worker ws://127.0.0.1:7860/ws。
+WORKER_WS_URL = "ws://127.0.0.1:7860/ws"
+
+
+@app.websocket("/ws")
+async def proxy_websocket_to_worker(ws: WebSocket):
+    """
+    全双工透明代理：前端 ←→ 后端 ←→ Worker
+    使用 Starlette 内置 WebSocket 客户端，避免第三方库版本兼容问题。
+    """
+    await ws.accept()
+
+    upstream: WsClient | None = None
+    pump_task: asyncio.Task | None = None
+
+    async def pump_worker_to_frontend():
+        """Worker → 前端异步转发（必须在 upstream 生命周期内运行）"""
+        assert upstream is not None
+        try:
+            while True:
+                msg = await upstream.receive_text()
+                await ws.send_text(msg)
+        except Exception:
+            pass
+
+    try:
+        # 连接 Worker
+        upstream = WsClient(WORKER_WS_URL)
+        await upstream.accept()
+
+        # 启动 worker → frontend 转发任务（前端 ← ws ← 后端 ← upstream ← worker）
+        pump_task = asyncio.create_task(pump_worker_to_frontend())
+
+        # 主循环：接收前端消息，转发给 worker
+        while True:
+            try:
+                msg = await ws.receive_text()
+                await upstream.send_text(msg)
+            except WebSocketDisconnect:
+                break
+            except Exception:
+                break
+
+    except Exception:
+        try:
+            await ws.close(code=1011, reason="Worker unavailable")
+        except Exception:
+            pass
+    finally:
+        if pump_task:
+            pump_task.cancel()
+            await asyncio.gather(pump_task, return_exceptions=True)
+        if upstream:
+            try:
+                await upstream.close()
+            except Exception:
+                pass
 
 
 @app.get("/api/health")

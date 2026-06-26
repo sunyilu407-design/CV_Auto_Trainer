@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTaskStore } from '../store/taskStore'
+import { useAuthStore } from '../store/authStore'
 import { filesApi } from '../api/backend'
 import MultiClassAnnotationCanvas, {
   MCBox,
@@ -7,7 +8,7 @@ import MultiClassAnnotationCanvas, {
   classColor,
 } from '../components/MultiClassAnnotationCanvas'
 
-const MIN_SEED_IMAGES = 20
+const MIN_SEED_IMAGES = 3
 
 interface ImageItem {
   name: string
@@ -91,9 +92,12 @@ export default function ManualAnnotation() {
   const currentImage = filteredList[currentIndex] || null
   const currentStem = currentImage ? currentImage.name.replace(/\.[^.]+$/, '') : ''
 
-  // Build image URL
+  // 用 hook 订阅 authStore，token 异步 hydrate（zustand persist 触发）时 imageUrl 会重算
+  const authToken = useAuthStore((s) => s.token)
+  // Build image URL — <img> 加载无法附加 Authorization header，
+  // 所以把 token 拼到 query string，后端 serve_dataset_image 端点有 fallback 鉴权。
   const imageUrl = currentImage && taskId
-    ? `/api/files/${taskId}/image/${encodeURIComponent(currentImage.name)}`
+    ? `/api/files/${taskId}/image/${encodeURIComponent(currentImage.name)}${authToken ? `?token=${encodeURIComponent(authToken)}` : ''}`
     : ''
 
   // Load boxes for current image (convert YOLO normalized → pixel when image loads)
@@ -235,7 +239,7 @@ export default function ManualAnnotation() {
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 60, color: 'var(--gray-500)' }}>
-        Loading dataset images...
+        正在加载数据集图片...
       </div>
     )
   }
@@ -252,14 +256,14 @@ export default function ManualAnnotation() {
         }}
       >
         <div>
-          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Manual Annotation</h2>
+          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>手动标注</h2>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--gray-500)' }}>
-            Annotated{' '}
+            已标注{' '}
             <strong style={{ color: annotatedCount >= MIN_SEED_IMAGES ? '#10b981' : '#f59e0b' }}>
               {annotatedCount}
             </strong>{' '}
-            / {totalImages} images (min {MIN_SEED_IMAGES})
-            {saving && <span style={{ marginLeft: 8, color: 'var(--gray-400)' }}>Saving...</span>}
+            / {totalImages} 张（最少 {MIN_SEED_IMAGES} 张）
+            {saving && <span style={{ marginLeft: 8, color: 'var(--gray-400)' }}>保存中...</span>}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -278,11 +282,11 @@ export default function ManualAnnotation() {
             }}
             title={
               canStartTraining
-                ? 'Start seed training'
-                : `Need at least ${MIN_SEED_IMAGES} annotations`
+                ? '开始种子训练'
+                : `至少需要 ${MIN_SEED_IMAGES} 张已标注图片`
             }
           >
-            Start Training ({annotatedCount}/{MIN_SEED_IMAGES})
+            开始训练 ({annotatedCount}/{MIN_SEED_IMAGES})
           </button>
         </div>
       </div>

@@ -219,6 +219,20 @@ def prepare_yolo_world_cache(progress_callback: Optional[Callable] = None) -> di
             progress_callback("yolo_world", "running", "正在准备 YOLO-World 权重")
         from ultralytics import YOLOWorld
 
+        # ultralytics 8.4+ 在 set_classes() 时硬要求 `import clip`。
+        # 启动脚本应该已通过 `pip install --user` 预装好；如果未装，抛出明确指引。
+        try:
+            import clip  # noqa: F401
+        except ImportError as _clip_exc:
+            raise DetectionSetupError(
+                "缺少 ultralytics/CLIP 包。\n"
+                "  原因：ultralytics 8.4+ 在调用 set_classes() 时硬要求 `import clip`。\n"
+                "  解决：在 worker/ 目录下运行 `python -m pip install --user "
+                "git+https://github.com/ultralytics/CLIP.git`，"
+                "或直接使用 scripts/start_worker_windows.ps1 / start_worker_macos.sh 启动 Worker（会自动预装）。\n"
+                f"  原始错误: {_clip_exc}"
+            ) from _clip_exc
+
         model = YOLOWorld(_resolve_yolo_world_weight())
         if progress_callback:
             progress_callback("clip", "running", "正在准备 CLIP 类别编码权重")

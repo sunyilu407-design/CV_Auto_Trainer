@@ -27,8 +27,10 @@ export default function SeedTraining() {
     setPhase('preparing')
     setError(null)
 
+    // Worker 在本地 7860 端口，前端直接连 Worker WebSocket。
+    // taskId 放在消息 payload 中传递给 Worker。
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${protocol}://${window.location.host}/ws/${taskId}`)
+    const ws = new WebSocket(`${protocol}://127.0.0.1:7860/ws`)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -120,9 +122,9 @@ export default function SeedTraining() {
 
   return (
     <div style={{ maxWidth: 600, margin: '0 auto' }}>
-      <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Seed Training</h2>
+      <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>种子训练</h2>
       <p style={{ fontSize: 13, color: 'var(--gray-500)', margin: '0 0 24px' }}>
-        Training a lightweight model on your {seedAnnotatedCount} annotated images, then auto-labeling the rest.
+        用已标注的 {seedAnnotatedCount} 张图训练轻量模型，再对剩余图片自动打标。
       </p>
 
       {/* Status card */}
@@ -184,21 +186,21 @@ export default function SeedTraining() {
               已标注 {seedAnnotatedCount} 张图，将训练 yolov8n 后对剩余图片自动打标
             </p>
             <button className="btn btn-primary" onClick={startTraining}>
-              Start Seed Training
+              开始种子训练
             </button>
           </div>
         )}
 
         {phase === 'preparing' && (
           <div style={{ textAlign: 'center', color: 'var(--gray-500)' }}>
-            Preparing dataset...
+            正在准备数据集...
           </div>
         )}
 
         {phase === 'training' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13 }}>
-              <span>Training: Epoch {progress.epoch}/{progress.totalEpochs}</span>
+              <span>训练中：Epoch {progress.epoch}/{progress.totalEpochs}</span>
               <span style={{ fontWeight: 600 }}>mAP50: {(progress.map50 * 100).toFixed(1)}%</span>
             </div>
             <div
@@ -225,7 +227,7 @@ export default function SeedTraining() {
         {phase === 'auto_labeling' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13 }}>
-              <span>Auto-labeling remaining images...</span>
+              <span>正在自动标注剩余图片...</span>
               <span>{autoLabelProgress.current}/{autoLabelProgress.total}</span>
             </div>
             <div
@@ -252,7 +254,7 @@ export default function SeedTraining() {
         {phase === 'done' && (
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>✓</div>
-            <p style={{ fontWeight: 600, marginBottom: 4 }}>Seed training & auto-labeling complete</p>
+            <p style={{ fontWeight: 600, marginBottom: 4 }}>种子训练与自动标注完成 ✓</p>
             {(() => {
               const stats = useTaskStore.getState().seedAutoLabelStats
               return (
@@ -274,7 +276,7 @@ export default function SeedTraining() {
               </p>
             ) : (
               <p style={{ fontSize: 13, color: 'var(--gray-500)', marginTop: 8 }}>
-                Proceeding to data augmentation and full training pipeline.
+                即将进入数据增强与完整训练流程。
               </p>
             )}
           </div>
@@ -283,9 +285,9 @@ export default function SeedTraining() {
         {phase === 'error' && (
           <div style={{ textAlign: 'center' }}>
             <p style={{ color: '#ef4444', fontWeight: 600, marginBottom: 12 }}>{error}</p>
-            <button className="btn btn-secondary" onClick={startTraining}>
-              Retry
-            </button>
+              <button className="btn btn-secondary" onClick={startTraining}>
+                重试
+              </button>
           </div>
         )}
       </div>
@@ -297,17 +299,17 @@ export default function SeedTraining() {
           onClick={() => setStage('manual_annotation')}
           disabled={phase === 'training' || phase === 'auto_labeling'}
         >
-          Back to Annotation
+          返回标注页面
         </button>
         {phase === 'done' && (
           <div style={{ display: 'flex', gap: 8 }}>
             {useTaskStore.getState().seedAutoLabelStats?.needsReview ? (
               <button className="btn btn-secondary btn-sm" onClick={() => setStage('review_auto_labels')} style={{ borderColor: '#f59e0b', color: '#f59e0b' }}>
-                Review Low-Confidence Boxes
+                审核低置信框
               </button>
             ) : null}
             <button className="btn btn-primary btn-sm" onClick={() => setStage('augment')}>
-              Continue to Augmentation →
+              继续数据增强 →
             </button>
           </div>
         )}
