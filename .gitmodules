@@ -1,0 +1,3 @@
+[submodule "Eagle-main"]
+	path = Eagle-main
+	url = https://github.com/NVlabs/Eagle.git
