@@ -119,6 +119,12 @@ class UserSettings(Base):
     default_gpu_type = Column(String, default="RTX 4090")
     default_train_mode = Column(String, default="local")
 
+    # Eagle 引擎配置
+    detection_engine = Column(String, default="auto")  # auto | yolo_world | locate_anything
+    vqa_engine = Column(String, default="auto")  # auto | moondream | eagle_vqa
+    locate_anything_enabled = Column(Boolean, default=False)
+    eagle_vqa_enabled = Column(Boolean, default=False)
+
 
 class NegotiationConversation(Base):
     """多智能体需求确认对话记录"""

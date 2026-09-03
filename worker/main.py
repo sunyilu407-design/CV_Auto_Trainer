@@ -141,7 +141,11 @@ def _model_prep_progress(name: str, status: str, message: str):
     _set_model_prep_step(name, status, message)
 
 
-def _run_model_prepare(include_moondream: bool):
+def _run_model_prepare(
+    include_moondream: bool = False,
+    include_locate_anything: bool = False,
+    include_eagle_vqa: bool = False,
+):
     import logging
     logger = logging.getLogger("worker.startup")
 
@@ -152,7 +156,12 @@ def _run_model_prepare(include_moondream: bool):
     try:
         from pipeline.stage2_labeler import prepare_labeling_model_cache
 
-        status = prepare_labeling_model_cache(include_moondream=include_moondream, progress_callback=_log_progress)
+        status = prepare_labeling_model_cache(
+            include_moondream=include_moondream,
+            include_locate_anything=include_locate_anything,
+            include_eagle_vqa=include_eagle_vqa,
+            progress_callback=_log_progress,
+        )
         _set_model_prep_status(status)
         logger.info(f"[模型准备] 完成: {status}")
         with _MODEL_PREP_LOCK:
@@ -190,27 +199,38 @@ async def startup_model_status_check():
     yolo_ok = status.get("yolo_world", {}).get("installed", False)
     clip_ok = status.get("clip", {}).get("installed", False)
     moon_ok = status.get("moondream", {}).get("installed", False)
+    locate_ok = status.get("locate_anything", {}).get("installed", False)
+    eagle_vqa_ok = status.get("eagle_vqa", {}).get("installed", False)
 
     need_yolo = not yolo_ok
     need_clip = not clip_ok
     need_moon = _PREPARE_MOONDREAM_ON_STARTUP and not moon_ok
+    # Eagle 引擎默认不自动下载，除非显式启用
+    need_locate = os.getenv("CV_PREPARE_LOCATE_ANYTHING", "0") == "1" and not locate_ok
+    need_eagle = os.getenv("CV_PREPARE_EAGLE_VQA", "0") == "1" and not eagle_vqa_ok
 
-    if not (need_yolo or need_clip or need_moon):
+    if not (need_yolo or need_clip or need_moon or need_locate or need_eagle):
         logger.info("[启动] 所有必需模型（YOLO-World + CLIP）已就绪，跳过预装。")
         return
 
     logger.info(
         f"[启动] 检测到未安装的模型，正在后台预装... "
-        f"需要 YOLO-World={need_yolo}, CLIP={need_clip}, Moondream2={need_moon}"
+        f"需要 YOLO-World={need_yolo}, CLIP={need_clip}, "
+        f"Moondream2={need_moon}, LocateAnything={need_locate}, Eagle2.5={need_eagle}"
     )
 
     include_moondream = _PREPARE_MOONDREAM_ON_STARTUP
+    include_locate = need_locate
+    include_eagle = need_eagle
+
     with _MODEL_PREP_LOCK:
         if _MODEL_PREP_STATE["running"]:
             logger.info("[启动] 模型预装任务已在运行中，跳过重复启动。")
             return
         _MODEL_PREP_STATE["running"] = True
         _MODEL_PREP_STATE["include_moondream"] = include_moondream
+        _MODEL_PREP_STATE["include_locate_anything"] = include_locate
+        _MODEL_PREP_STATE["include_eagle_vqa"] = include_eagle
         _MODEL_PREP_STATE["error"] = None
         if need_yolo:
             _MODEL_PREP_STATE["steps"]["yolo_world"] = {"status": "running", "message": "启动中准备 YOLO-World"}
@@ -220,10 +240,18 @@ async def startup_model_status_check():
             _MODEL_PREP_STATE["steps"]["moondream"] = {"status": "pending", "message": "等待下载 Moondream2"}
         elif not include_moondream:
             _MODEL_PREP_STATE["steps"]["moondream"] = {"status": "optional", "message": "已选择跳过 Moondream VQA"}
+        if need_locate:
+            _MODEL_PREP_STATE["steps"]["locate_anything"] = {"status": "pending", "message": "等待下载 LocateAnything-3B"}
+        else:
+            _MODEL_PREP_STATE["steps"]["locate_anything"] = {"status": "optional", "message": "可选：更快的检测速度"}
+        if need_eagle:
+            _MODEL_PREP_STATE["steps"]["eagle_vqa"] = {"status": "pending", "message": "等待下载 Eagle2.5-8B"}
+        else:
+            _MODEL_PREP_STATE["steps"]["eagle_vqa"] = {"status": "optional", "message": "可选：更强的质检能力"}
 
     # 在后台线程执行，不阻塞 uvicorn 启动
     asyncio.create_task(
-        asyncio.to_thread(_run_model_prepare, include_moondream)
+        asyncio.to_thread(_run_model_prepare, include_moondream, include_locate, include_eagle)
     )
 
 
@@ -418,16 +446,29 @@ async def _handle_command(ws: WebSocket, data: dict):
             # ── v9.0 P1：三路由引擎选择（在 run_detection 之前决定） ──
             from pipeline.engine_router import (
                 select_engine,
+                select_detection_engine,
                 remap_raw_boxes,
                 merge_raw_boxes,
             )
 
-            engine_decision = select_engine(
+            # 新增：Eagle 引擎选择 (LocateAnything / YOLO-World)
+            engine_preference = payload.get("engine_preference", "auto")
+            eagle_engine_decision = select_detection_engine(
                 full_classes,
-                task_type=payload.get("task_type", ""),
-                user_preference=payload.get("engine_preference", "auto"),
+                user_preference=engine_preference,
             )
-            chosen_engine = engine_decision["engine"] if not use_existing else "existing_labels"
+
+            # 优先检查 Eagle 引擎（如果用户指定或自动选择）
+            if eagle_engine_decision["engine"] == "locate_anything" and eagle_engine_decision["available"]:
+                chosen_engine = "locate_anything"
+            else:
+                # 回退到原有三路由逻辑
+                engine_decision = select_engine(
+                    full_classes,
+                    task_type=payload.get("task_type", ""),
+                    user_preference=payload.get("engine_preference", "auto"),
+                )
+                chosen_engine = engine_decision["engine"] if not use_existing else "existing_labels"
 
             if not use_existing:
                 await _safe_ws_send(ws, {
@@ -452,6 +493,17 @@ async def _handle_command(ws: WebSocket, data: dict):
                     use_existing_labels=use_existing,
                 )
 
+            def _run_locate_anything(classes_subset):
+                from pipeline.stage2_labeler import run_locate_anything_detection
+                return run_locate_anything_detection(
+                    image_dir=str(resolved_image_dir),
+                    classes=classes_subset,
+                    output_raw_dir=str(resolved_output_raw_dir),
+                    conf_threshold=payload.get("conf_threshold", 0.25),
+                    batch_size=payload.get("batch_size", 4),
+                    progress_callback=make_progress,
+                )
+
             def _run_gdino(classes_subset):
                 from pipeline.grounding_dino_detector import run_grounding_dino_detection
                 return run_grounding_dino_detection(
@@ -463,9 +515,13 @@ async def _handle_command(ws: WebSocket, data: dict):
                     progress_callback=make_progress,
                 )
 
-            if use_existing or chosen_engine == "yolo_world":
+            # 根据选择的引擎执行检测
+            if use_existing:
                 raw_boxes = await asyncio.to_thread(_run_yolo_world, full_classes)
-                engine_used = chosen_engine
+                engine_used = "existing_labels"
+            elif chosen_engine == "locate_anything":
+                raw_boxes = await asyncio.to_thread(_run_locate_anything, full_classes)
+                engine_used = "locate_anything"
             elif chosen_engine == "grounding_dino":
                 from pipeline.grounding_dino_detector import is_grounding_dino_available
                 if is_grounding_dino_available():
@@ -583,14 +639,44 @@ async def _handle_command(ws: WebSocket, data: dict):
                     "total": image_total,
                 })
             else:
-                # 第二段：Moondream VQA 五维度质检
-                passed, qc_stats = await asyncio.to_thread(
-                    run_quality_check,
-                    raw_boxes_path=f"{resolved_output_raw_dir}/raw_boxes.json",
-                    min_confidence=payload.get("qa_threshold", 0.5),
-                    progress_callback=make_progress,
-                    dim_thresholds=payload.get("qa_dim_thresholds"),
-                )
+                # 第二段：VQA 质检
+                # 选择 VQA 引擎
+                vqa_engine_pref = payload.get("vqa_engine_preference", "auto")
+                from pipeline.engine_router import select_vqa_engine
+                vqa_engine_decision = select_vqa_engine(user_preference=vqa_engine_pref)
+                
+                if vqa_engine_decision["engine"] == "eagle_vqa" and vqa_engine_decision["available"]:
+                    from pipeline.stage2_labeler import run_eagle_vqa_quality_check
+                    await _safe_ws_send(ws, {
+                        "type": "progress",
+                        "stage": "quality_check",
+                        "current": 0,
+                        "total": 1,
+                        "engine": "eagle_vqa",
+                        "message": f"VQA 引擎：Eagle2.5（{vqa_engine_decision['reason']}）",
+                    })
+                    passed, qc_stats = await asyncio.to_thread(
+                        run_eagle_vqa_quality_check,
+                        raw_boxes_path=f"{resolved_output_raw_dir}/raw_boxes.json",
+                        min_confidence=payload.get("qa_threshold", 0.5),
+                        progress_callback=make_progress,
+                    )
+                else:
+                    await _safe_ws_send(ws, {
+                        "type": "progress",
+                        "stage": "quality_check",
+                        "current": 0,
+                        "total": 1,
+                        "engine": "moondream",
+                        "message": f"VQA 引擎：Moondream2（{vqa_engine_decision.get('reason', '自动选择')}）",
+                    })
+                    passed, qc_stats = await asyncio.to_thread(
+                        run_quality_check,
+                        raw_boxes_path=f"{resolved_output_raw_dir}/raw_boxes.json",
+                        min_confidence=payload.get("qa_threshold", 0.5),
+                        progress_callback=make_progress,
+                        dim_thresholds=payload.get("qa_dim_thresholds"),
+                    )
 
             await asyncio.to_thread(
                 save_yolo_labels,
@@ -907,12 +993,16 @@ def get_model_status():
 @app.post("/prepare-models")
 async def prepare_models(payload: dict):
     include_moondream = bool(payload.get("include_moondream", False))
+    include_locate_anything = bool(payload.get("include_locate_anything", False))
+    include_eagle_vqa = bool(payload.get("include_eagle_vqa", False))
 
     with _MODEL_PREP_LOCK:
         if _MODEL_PREP_STATE["running"]:
             return dict(_MODEL_PREP_STATE)
         _MODEL_PREP_STATE["running"] = True
         _MODEL_PREP_STATE["include_moondream"] = include_moondream
+        _MODEL_PREP_STATE["include_locate_anything"] = include_locate_anything
+        _MODEL_PREP_STATE["include_eagle_vqa"] = include_eagle_vqa
         _MODEL_PREP_STATE["error"] = None
         _MODEL_PREP_STATE["steps"]["yolo_world"] = {"status": "running", "message": "准备 YOLO-World"}
         _MODEL_PREP_STATE["steps"]["clip"] = {"status": "pending", "message": "等待 YOLO-World 类别编码"}
@@ -920,8 +1010,18 @@ async def prepare_models(payload: dict):
             _MODEL_PREP_STATE["steps"]["moondream"] = {"status": "pending", "message": "等待下载 Moondream2"}
         else:
             _MODEL_PREP_STATE["steps"]["moondream"] = {"status": "optional", "message": "已选择跳过 Moondream VQA"}
+        if include_locate_anything:
+            _MODEL_PREP_STATE["steps"]["locate_anything"] = {"status": "pending", "message": "等待下载 LocateAnything-3B"}
+        else:
+            _MODEL_PREP_STATE["steps"]["locate_anything"] = {"status": "optional", "message": "可选：更快的检测速度"}
+        if include_eagle_vqa:
+            _MODEL_PREP_STATE["steps"]["eagle_vqa"] = {"status": "pending", "message": "等待下载 Eagle2.5-8B"}
+        else:
+            _MODEL_PREP_STATE["steps"]["eagle_vqa"] = {"status": "optional", "message": "可选：更强的质检能力"}
 
-    asyncio.create_task(asyncio.to_thread(_run_model_prepare, include_moondream))
+    asyncio.create_task(asyncio.to_thread(
+        _run_model_prepare, include_moondream, include_locate_anything, include_eagle_vqa
+    ))
 
     with _MODEL_PREP_LOCK:
         return dict(_MODEL_PREP_STATE)

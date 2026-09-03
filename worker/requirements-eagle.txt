@@ -1,0 +1,110 @@
+# =============================================================================
+# Eagle/LocateAnything 环境依赖
+# =============================================================================
+# 用于 CV_Auto_Trainer 的 LocateAnything 和 Eagle2.5 引擎
+#
+# 安装方式:
+#   # 方式1: 直接安装 (需要 CUDA GPU)
+#   pip install -r requirements-eagle.txt
+#
+#   # 方式2: 安装本地 Eagle 仓库 (开发用)
+#   pip install -e ../../Eagle-main/Embodied
+#   pip install -e ../../Eagle-main/Eagle2_5
+#
+# 硬件要求:
+#   - LocateAnything: >= 6GB VRAM (RTX 3060 或更高)
+#   - Eagle2.5 VQA:   >= 16GB VRAM (RTX 4090 或 A100)
+#
+# =============================================================================
+
+# PyTorch (CUDA 11.8)
+# 请根据你的 CUDA 版本选择合适的安装命令:
+# CUDA 11.8: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# CUDA 12.1: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# =============================================================================
+# LocateAnything 依赖 (用于目标检测)
+# =============================================================================
+# 模型: nvidia/LocateAnything-3B
+# 显存需求: ~6GB (FP16)
+# 特性: 目标检测、OCR、GUI定位、点定位，12.7 BPS
+# =============================================================================
+
+# 核心依赖
+transformers==4.57.1
+tokenizers==0.22.0
+sentencepiece>=0.2.0
+accelerate>=1.5.2
+peft>=0.12.0
+
+# 视觉相关
+timm>=1.0.11
+einops
+einops-exts
+decord
+opencv-python-headless>=4.8.0
+Pillow>=9.0.0
+
+# 其他依赖
+shortuuid
+numpy>=1.25,<2
+scikit-learn>=1.2.2
+lmdb
+requests
+httpx>=0.27.0
+
+# =============================================================================
+# Eagle2.5 VQA 依赖 (用于质检)
+# =============================================================================
+# 模型: nvidia/Eagle2.5-8B
+# 显存需求: ~16GB (FP16)
+# 特性: VQA质检、图像描述、长上下文(128K)
+# =============================================================================
+
+# 注意: Eagle2.5 与 LocateAnything 的 transformers 版本可能冲突
+# 如果同时安装两个模型，可能需要手动解决版本冲突
+# 推荐: transformers>=4.57.1
+
+# 可选: FlashAttention (显著加速推理)
+# pip install flash-attn --no-build-isolation
+# 注意: FlashAttention 需要 CUDA 11.8+ 和支持 Ampere 架构的 GPU
+
+# 可选: bitsandbytes (量化加速)
+# bitsandbytes
+
+# =============================================================================
+# 开发依赖
+# =============================================================================
+
+# 可选: 调试和日志
+wandb>=0.17.7
+
+# =============================================================================
+# 安装说明
+# =============================================================================
+
+# 1. 首先安装 PyTorch (根据你的 CUDA 版本选择)
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# 2. 然后安装本文件
+# pip install -r requirements-eagle.txt
+
+# 3. 或直接从 HuggingFace 下载模型 (需要 HF_TOKEN)
+# python -c "from huggingface_hub import snapshot_download; \
+#     snapshot_download('nvidia/LocateAnything-3B'); \
+#     snapshot_download('nvidia/Eagle2.5-8B')"
+
+# =============================================================================
+# 模型下载 (国内镜像)
+# =============================================================================
+
+# 如果网络访问 huggingface.co 较慢，可以使用镜像:
+# export HF_ENDPOINT=https://hf-mirror.com
+# pip install -r requirements-eagle.txt
+
+# 或设置环境变量后下载模型:
+# HF_ENDPOINT=https://hf-mirror.com python -c "from huggingface_hub import snapshot_download; \
+#     snapshot_download('nvidia/LocateAnything-3B')"

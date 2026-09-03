@@ -6,6 +6,8 @@ export type CloudProvider = 'generic' | 'autodl'
 export type VlmProvider = 'openai' | 'kimi' | 'minimax' | 'zhipu' | 'gemini' | 'claude' | 'custom'
 export type VlmApiFormat = 'openai' | 'anthropic' | 'gemini'
 export type ReasoningProvider = 'deepseek' | 'openai' | 'kimi' | 'qwen' | 'zhipu' | 'custom'
+export type DetectionEngineType = 'auto' | 'yolo_world' | 'locate_anything'
+export type VqaEngineType = 'auto' | 'moondream' | 'eagle_vqa'
 
 export interface UserSettings {
   vlmProvider: VlmProvider
@@ -36,6 +38,12 @@ export interface UserSettings {
   defaultDeleteOriginal: boolean
   defaultGpuType: string
   defaultTrainMode: 'local' | 'cloud'
+
+  // Eagle 引擎配置
+  detectionEngine: DetectionEngineType
+  vqaEngine: VqaEngineType
+  locateAnythingEnabled: boolean
+  eagleVqaEnabled: boolean
 }
 
 interface SettingsState {
@@ -74,6 +82,10 @@ const snakeToCamel: Record<string, string> = {
   vlm_temperature: 'vlmTemperature',
   vlm_top_p: 'vlmTopP',
   vlm_stop: 'vlmStop',
+  detection_engine: 'detectionEngine',
+  vqa_engine: 'vqaEngine',
+  locate_anything_enabled: 'locateAnythingEnabled',
+  eagle_vqa_enabled: 'eagleVqaEnabled',
 }
 
 const camelToSnake: Record<string, string> = Object.fromEntries(
@@ -117,6 +129,12 @@ const defaultSettings: UserSettings = {
   defaultDeleteOriginal: false,
   defaultGpuType: 'RTX 4090',
   defaultTrainMode: 'local',
+
+  // Eagle 引擎配置
+  detectionEngine: 'auto',
+  vqaEngine: 'auto',
+  locateAnythingEnabled: false,
+  eagleVqaEnabled: false,
 }
 
 function authHeaders(): HeadersInit {

@@ -36,6 +36,8 @@ export interface ModelPathSummary {
 export interface ModelPrepState {
   running: boolean
   include_moondream: boolean
+  include_locate_anything: boolean
+  include_eagle_vqa: boolean
   steps: Record<string, { status: string; message: string }>
   error: string | null
   status: {
@@ -59,6 +61,18 @@ export interface ModelPrepState {
       complete_snapshots?: string[]
       snapshot_count?: number
     }
+    locate_anything?: {
+      model: string
+      cache: ModelPathSummary
+      installed: boolean
+      size_bytes: number
+    }
+    eagle_vqa?: {
+      model: string
+      cache: ModelPathSummary
+      installed: boolean
+      size_bytes: number
+    }
   } | null
 }
 
@@ -68,11 +82,25 @@ export async function fetchModelStatus() {
   return res.json() as Promise<ModelPrepState>
 }
 
-export async function prepareModels(includeMoondream: boolean) {
+export async function prepareModels(options: {
+  includeMoondream?: boolean
+  includeLocateAnything?: boolean
+  includeEagleVqa?: boolean
+} = {}) {
+  const {
+    includeMoondream = false,
+    includeLocateAnything = false,
+    includeEagleVqa = false,
+  } = options
+
   const res = await fetch(`${WORKER_HTTP_BASE}/prepare-models`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ include_moondream: includeMoondream }),
+    body: JSON.stringify({
+      include_moondream: includeMoondream,
+      include_locate_anything: includeLocateAnything,
+      include_eagle_vqa: includeEagleVqa,
+    }),
   })
   if (!res.ok) throw new Error('启动模型准备失败')
   return res.json() as Promise<ModelPrepState>

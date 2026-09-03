@@ -53,7 +53,7 @@ export default function EnvironmentPrep() {
     if (!status || autoStarted || skipLabeling || state?.running) return
     if (!status.yolo_world.installed || !status.clip.installed) {
       setAutoStarted(true)
-      prepareModels(false)
+      prepareModels()
         .then(setState)
         .catch((e) => setError(e instanceof Error ? e.message : '启动模型准备失败'))
     }
@@ -63,8 +63,10 @@ export default function EnvironmentPrep() {
   const yoloReady = Boolean(status?.yolo_world.installed)
   const clipReady = Boolean(status?.clip.installed)
   const moondreamReady = Boolean(status?.moondream.installed)
+  const locateAnythingReady = Boolean(status?.locate_anything?.installed)
+  const eagleVqaReady = Boolean(status?.eagle_vqa?.installed)
   const requiredReady = skipLabeling || (yoloReady && clipReady)
-  const canContinue = requiredReady && (skipQualityCheck || moondreamReady || skipLabeling)
+  const canContinue = requiredReady && (skipQualityCheck || moondreamReady || locateAnythingReady || eagleVqaReady || skipLabeling)
 
   const progressText = useMemo(() => {
     if (error) return error
@@ -76,7 +78,8 @@ export default function EnvironmentPrep() {
 
   const startPrepare = async () => {
     try {
-      setState(await prepareModels(includeMoondream))
+      // TODO: 添加用户选择的引擎选项
+      setState(await prepareModels({ includeMoondream: !skipQualityCheck && !skipLabeling }))
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '启动模型准备失败')
@@ -114,30 +117,63 @@ export default function EnvironmentPrep() {
             status={skipQualityCheck ? 'optional' : (state?.steps.moondream.status ?? 'pending')}
             size={status ? formatSize(status.moondream.cache.size_bytes) : undefined}
           />
+          <StepCard
+            title="LocateAnything"
+            subtitle={status?.locate_anything ? 'Eagle 家族检测引擎，支持 OCR/GUI 定位（需要 6GB+ 显存）' : '可选：更快的检测速度(12.7 BPS)'}
+            status={status?.locate_anything?.installed ? 'complete' : 'optional'}
+            size={status?.locate_anything ? formatSize(status.locate_anything.size_bytes) : undefined}
+          />
+          <StepCard
+            title="Eagle2.5 VQA"
+            subtitle={status?.eagle_vqa ? 'Eagle 家族 VQA 引擎，更强的视觉理解能力（需要 16GB+ 显存）' : '可选：更精确的质检能力'}
+            status={status?.eagle_vqa?.installed ? 'complete' : 'optional'}
+            size={status?.eagle_vqa ? formatSize(status.eagle_vqa.size_bytes) : undefined}
+          />
         </div>
       </div>
 
       {!skipLabeling && (
         <div className="card-section" style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-500)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>质检策略</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-500)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>检测引擎选择</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 12 }}>
             <button
               className="btn"
               onClick={() => setSkipQualityCheck(true)}
               style={{ justifyContent: 'flex-start', background: skipQualityCheck ? 'var(--success-green)' : '#fff', color: skipQualityCheck ? '#fff' : 'var(--gray-700)', border: `1px solid ${skipQualityCheck ? 'var(--success-green)' : 'var(--gray-200)'}` }}
             >
-              跳过 Moondream 质检
+              跳过 VQA 质检
             </button>
             <button
               className="btn"
               onClick={() => setSkipQualityCheck(false)}
               style={{ justifyContent: 'flex-start', background: !skipQualityCheck ? 'var(--preview-pink)' : '#fff', color: !skipQualityCheck ? '#fff' : 'var(--gray-700)', border: `1px solid ${!skipQualityCheck ? 'var(--preview-pink)' : 'var(--gray-200)'}` }}
             >
-              启用 Moondream 质检
+              启用 VQA 质检
             </button>
           </div>
-          <p style={{ fontSize: 12, color: 'var(--gray-500)', lineHeight: 1.7, margin: '12px 0 0' }}>
-            默认跳过 VQA 质检，只使用 YOLO-World 初筛，避免首次下载 7GB 级模型阻塞流程；需要更严格数据质量时再启用 Moondream。
+          <p style={{ fontSize: 12, color: 'var(--gray-500)', lineHeight: 1.7, margin: '0 0 12px' }}>
+            默认跳过 VQA 质检，只使用检测引擎初筛；需要更严格数据质量时再启用 VQA 质检。
+          </p>
+          
+          <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-500)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>VQA 引擎</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+            <button
+              className="btn"
+              style={{ justifyContent: 'flex-start', background: '#fff', color: 'var(--gray-700)', border: '1px solid var(--gray-200)' }}
+            >
+              Moondream2（默认，4GB 显存）
+            </button>
+            <button
+              className="btn"
+              style={{ justifyContent: 'flex-start', background: '#fff', color: eagleVqaReady ? 'var(--gray-700)' : 'var(--gray-400)', border: '1px solid var(--gray-200)', cursor: eagleVqaReady ? 'pointer' : 'not-allowed' }}
+              disabled={!eagleVqaReady}
+              title={eagleVqaReady ? 'Eagle2.5 VQA（需要 16GB 显存）' : '需要安装 Eagle2.5 VQA 模型'}
+            >
+              Eagle2.5（需要 16GB 显存）
+            </button>
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--gray-500)', lineHeight: 1.7, margin: 0 }}>
+            <strong>硬件要求：</strong>LocateAnything 需要 6GB+ 显存，Eagle2.5 需要 16GB+ 显存。系统会自动根据可用显存选择合适的引擎。
           </p>
         </div>
       )}
